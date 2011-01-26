@@ -361,7 +361,7 @@
 
 - (void) convertModifiedDate:(NSString**)buffer date:(NSDate*)date {
     // date: "2010-11-17 09:29:18 +0000"
-    NSString* format = @"MMM dd";
+    NSString* format = @"MM/dd";
     
     NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
     [formatter setDateFormat:format];
