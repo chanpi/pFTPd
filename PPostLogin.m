@@ -11,6 +11,7 @@
 #import "PSysUtil.h"
 #import "PControlIO.h"
 #import "PPrivilegeSocket.h"
+#import "PSession.h"
 
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -108,10 +109,10 @@
     char path[256];
     char* pwd = getcwd(path, sizeof(path));
     if (pwd != NULL) {
-        session.resMessage_ = [NSString stringWithUTF8String:path];
+        session.resMessage_ = [NSString stringWithFormat:@"\"%@\"", [NSString stringWithUTF8String:path]];
     } else {
         NSLog(@"getcwd = NULL!!!");
-        session.resMessage_ = @"/";
+        session.resMessage_ = @"\"/\"";
     }
     session.resCode_ = FTP_PWDOK;
     [ctrlIO_ sendResponseNormal:session];
@@ -163,6 +164,7 @@
 - (void) handlePASV:(PSession*)session isEPSV:(BOOL)isEPSV {
     unsigned short pasvPort;
     BOOL isIPv6;
+    
     if (session.pLocalAddress_ == NULL) {   // TODO!!!!
         session.resCode_ = FTP_GOODBYE;
         session.resMessage_ = @"Server Error. (EPSV)";
@@ -197,8 +199,10 @@
     //[self pasvCleanup:session];
     //[self portCleanup:session];
     
-    //[self listenPasvSocket:session];
-    pasvPort = 23451;
+    pasvPort = [self listenPasvSocket:session];
+    if (pasvPort == 0) {    // ERROR
+        return;
+    }
     
     if (isEPSV) {
         session.resCode_ = FTP_EPSVOK;
@@ -206,20 +210,21 @@
         [ctrlIO_ sendResponseNormal:session];
         return;
     } else {
-        /*
-        char localAddress[32] = {0};
-        char *pReplace = NULL;
-        NSLog(@"%d", session.pPortSockAddress_->u.u_sockaddr_in.sin_addr.s_addr);
-        strcpy(localAddress, inet_ntoa(session.pPortSockAddress_->u.u_sockaddr_in.sin_addr));
-        fprintf(stderr, "[%s]\n", localAddress);
-        
-        while ((pReplace = strchr(localAddress, '.')) != NULL) {
-            *pReplace = ',';
+        char localAddress[20] = {0};
+        char* p = localAddress;
+        struct in_addr inAddr;
+        inAddr = session.pLocalAddress_->u.u_sockaddr_in.sin_addr;
+        strcpy(localAddress, inet_ntoa(inAddr));
+        while (*p != '\0') {
+            if (*p == '.') {
+                *p = ',';
+            }
+            p++;
         }
-        */
         
         session.resCode_ = FTP_PASVOK;
-        session.resMessage_ = [NSString stringWithFormat:@"Entering Passive Mode. 10,0,6,147,%d,%d", 0xff & pasvPort>>8, 0xff & pasvPort];
+        session.resMessage_ = [NSString stringWithFormat:@"Entering Passive Mode. %@,%d,%d",
+                               [NSString stringWithUTF8String:localAddress], 0xff & pasvPort>>8, 0xff & pasvPort];
         [ctrlIO_ sendResponseNormal:session];
         return;
     }
@@ -248,7 +253,18 @@
 }
 
 - (void) handleLIST:(PSession*)session {
-    [self handleDirCommon:session fullDetailes:YES statCommand:NO];
+    BOOL fullDetails = YES;
+    if (session.reqMessage_ != nil && [session.reqMessage_ length] > 1 && [session.reqMessage_ characterAtIndex:0] == '-') {
+        NSArray* tokens = [session.reqMessage_ componentsSeparatedByString:@" "];
+        if ([tokens count] > 1) {
+            [session.reqMessage_ release];  // 一度allocしたものをrelease
+            session.reqMessage_ = [[NSString alloc] initWithString:[tokens objectAtIndex:1]];
+        } else {
+            [session.reqMessage_ release];  // 一度allocしたものをrelease
+            session.reqMessage_ = [[NSString alloc] initWithString:@""];
+        }
+    }
+    [self handleDirCommon:session fullDetailes:fullDetails statCommand:NO];
 }
 
 - (void) handleNLIST:(PSession*)session {
@@ -260,9 +276,9 @@
 }
 
 - (void) handleDirCommon:(PSession *)session fullDetailes:(BOOL)fullDetailes statCommand:(BOOL)statCommand {
-    int error;
+    socklen_t sockLength = 0;
     NSString* dirPath = session.reqMessage_;
-    if (dirPath == nil) {
+    if (dirPath == nil || [dirPath length] == 0) {
         char currentDirectory[32];
         if (getcwd(currentDirectory, sizeof(currentDirectory)) != NULL) {
             dirPath = [NSString stringWithUTF8String:currentDirectory];
@@ -274,7 +290,7 @@
         }
     }
     
-    NSLog(@"currentDir = %@", dirPath);
+    NSLog(@"currentDir = %@[%d]", dirPath, [dirPath length]);
     
     NSMutableString* directory = [[NSMutableString alloc] init];
     PSysUtil* sysUtil = [[PSysUtil alloc] init];
@@ -282,29 +298,17 @@
     NSLog(@"%@", directory);
     [sysUtil release];
     
-    // リモートアドレスの設定
-    session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (session.dataFd_ < 0) {
-        NSLog(@"[ERROR] Failed to create socket() in handleDirCommon.");
-        session.resCode_ = FTP_BADSENDCONN;
-        session.resMessage_ = @"Failed to create data socket.";
-        [ctrlIO_ sendResponseNormal:session];
-        return;
-    }
-    
     // データ接続をオープンしようとすることを知らせる
     session.resCode_ = FTP_DATACONN;
     session.resMessage_ = @"Here comes the directory listing.";
     [ctrlIO_ sendResponseNormal:session];
     
-    error = connect(session.dataFd_, (const struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in));
-    if (error < 0) {
-        NSLog(@"[ERROR] Can't open data connection.");
-        session.resCode_ = FTP_BADSENDCONN;
-        session.resMessage_ = @"Can't open data connection.";
-        [ctrlIO_ sendResponseNormal:session];
-        return;
+    if (session.pPortSockAddress_ == NULL) {
+        session.pPortSockAddress_ = (struct Psockaddr*)malloc(sizeof(struct Psockaddr));
     }
+    sockLength = sizeof(struct sockaddr);
+    session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)session.pPortSockAddress_, &sockLength);
+    NSLog(@"accepted!!!!");
     
     [dataIO_ sendData:session data:[directory UTF8String] dataSize:[directory length]];
     session.resCode_ = FTP_TRANSFEROK;
@@ -312,72 +316,8 @@
     [ctrlIO_ sendResponseNormal:session];
     
     close(session.dataFd_);
+    close(session.pasvListenFd_);
     [directory release];
-
-    /*
-    char commandBuffer[512];
-    FILE* fp;
-    int error;
-    char lscommand[12];
-    if (fullDetailes) {
-        if (session.reqMessage_ == nil) {
-            strcpy(lscommand, "ls -l");
-        } else {
-            sprintf(lscommand, "ls %s", [session.reqMessage_ UTF8String]);
-        }
-    } else {
-        strcpy(lscommand, "ls");
-    }
-    
-    if ((fp = popen(lscommand, "r")) == NULL) {
-        NSLog(@"[ERROR] popen()");
-        session.resCode_ = FTP_BADSENDFILE;
-        session.resMessage_ = @"Requested action aborted. Local error in processing : popen";
-        [ctrlIO_ sendResponseNormal:session];
-        return;
-    }
-    
-    // リモートアドレスの設定
-    session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (session.dataFd_ < 0) {
-        NSLog(@"[ERROR] Failed to create socket() in handleDirCommon.");
-        session.resCode_ = FTP_BADSENDCONN;
-        session.resMessage_ = @"Failed to create data socket.";
-        [ctrlIO_ sendResponseNormal:session];
-        return;
-    }
-    
-    // データ接続をオープンしようとすることを知らせる
-    session.resCode_ = FTP_DATACONN;
-    session.resMessage_ = @"Here comes the directory listing.";
-    [ctrlIO_ sendResponseNormal:session];
-    
-    error = connect(session.dataFd_, (const struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in));
-    if (error < 0) {
-        NSLog(@"[ERROR] Can't open data connection.");
-        session.resCode_ = FTP_BADSENDCONN;
-        session.resMessage_ = @"Can't open data connection.";
-        [ctrlIO_ sendResponseNormal:session];
-        return;
-    }
-    
-    while (1) {
-        memset(commandBuffer, 0x00, sizeof(commandBuffer));
-        fgets(commandBuffer, sizeof(commandBuffer), fp);
-        fprintf(stderr, "%s", commandBuffer);
-        if (feof(fp)) {
-            session.resCode_ = FTP_TRANSFEROK;
-            session.resMessage_ = @"Directory send OK.";
-            [ctrlIO_ sendResponseNormal:session];
-            break;
-        }
-        if ([dataIO_ sendData:session data:commandBuffer dataSize:strlen(commandBuffer)] == 0) {
-            break;
-        }
-    }
-    pclose(fp);
-    close(session.dataFd_);
-     */
 }
 
 - (void) handleSIZE:(PSession*)session {
@@ -631,6 +571,12 @@
     [ctrlIO_ sendResponseNormal:session];
 }
 
+- (void) handleNOOP:(PSession*)session {
+    session.resCode_ = FTP_NOOPOK;
+    session.resMessage_ = @"Ok";
+    [ctrlIO_ sendResponseNormal:session];
+}
+
 - (void) handleUNKNOWN:(PSession*)session {
     session.resCode_ = FTP_COMMANDNOTIMPL;
     session.resMessage_ = [NSString stringWithFormat:@"[Unsupported] %@", session.reqCommand_];
@@ -658,13 +604,43 @@
 }
 
 - (unsigned short) listenPasvSocket:(PSession*)session {
-    PPrivilegeSocket* privSock = [[PPrivilegeSocket alloc] init];
-    unsigned short listenPort = 0;
-    [privSock sendCommand:session.controlFd_ command:PRIV_SOCK_PASV_LISTEN];
-    listenPort = (unsigned short)[privSock getInt:session.controlFd_];
-    [privSock release];
+    struct sockaddr_in address;
+    address.sin_family = AF_INET;
+    address.sin_port = 0;    // TODO 0
+    address.sin_addr.s_addr = INADDR_ANY;
     
-    return listenPort;
+    session.pasvListenFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (session.pasvListenFd_ <= 0) {
+        NSLog(@"[ERROR] Failed to create pasv socket.");
+        session.resCode_ = FTP_FILEFAIL;
+        session.resMessage_ = @"Failed to pasv socket.";
+        [ctrlIO_ sendResponseNormal:session];
+
+        return 0;
+    }
+    if (bind(session.pasvListenFd_, (const struct sockaddr*)&address, sizeof(struct sockaddr)) < 0) {
+        NSLog(@"[ERROR] Failed to bind pasv socket.");
+        session.resCode_ = FTP_FILEFAIL;
+        session.resMessage_ = @"Failed to bind pasv socket.";
+        [ctrlIO_ sendResponseNormal:session];
+        return 0;
+    }
+    if (listen(session.pasvListenFd_, 1) < 0) {
+        NSLog(@"[ERROR] Failed to listen pasv socket.");
+        session.resCode_ = FTP_FILEFAIL;
+        session.resMessage_ = @"Failed to listen pasv socket.";
+        [ctrlIO_ sendResponseNormal:session];
+        return 0;
+    }
+    
+    
+    struct sockaddr_in pasvAddr;
+    socklen_t pasvLen = sizeof(pasvAddr);
+    if (getsockname(session.pasvListenFd_, (struct sockaddr*)&pasvAddr, &pasvLen) == 0) {
+        fprintf(stderr, "[PASVPORT] %d (%d)\n", ntohs(address.sin_port), ntohs(pasvAddr.sin_port));
+        return ntohs(pasvAddr.sin_port);
+    }
+    return ntohs(address.sin_port);
 }
 
 - (BOOL) isPortActive:(PSession*)session {

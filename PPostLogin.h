@@ -37,8 +37,9 @@
 
 - (void) handleSTOR:(PSession*)session;
 
-- (void) handleHELP:(PSession*)session;
 - (void) handleQUIT:(PSession*)session;
+- (void) handleHELP:(PSession*)session;
+- (void) handleNOOP:(PSession*)session;
 - (void) handleUNKNOWN:(PSession*)session;
 
 @end

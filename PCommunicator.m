@@ -47,23 +47,26 @@
      */
     
     // main: session_init途中！！
-    struct Psockaddr tempAddress;
-    //[sysUtil getPeerName:session.controlFd_ pSockAddrPtr:&tempAddress];
-    [sysUtil getPeerName:P_COMMAND_FD pSockAddrPtr:&tempAddress];
-    if (session.pRemoteAddress_ == NULL) {
-        session.pRemoteAddress_ = (struct Psockaddr*)malloc(sizeof(struct Psockaddr));
-		fprintf(stderr, "session.pRemoteAddress_ %p", session.pRemoteAddress_);
+    struct sockaddr tempAddress;
+    socklen_t length = sizeof(tempAddress);
+    if (getpeername(session.controlFd_, &tempAddress, &length) == 0) {
+        if (session.pRemoteAddress_ == NULL) {
+            session.pRemoteAddress_ = (struct Psockaddr*)malloc(sizeof(struct Psockaddr));
+            fprintf(stderr, "session.pRemoteAddress_ %p", session.pRemoteAddress_);
+        }
+        memcpy(session.pRemoteAddress_, &tempAddress, sizeof(tempAddress));
+        NSLog(@"getpeername successful.");
     }
-    memcpy(session.pRemoteAddress_, &tempAddress, sizeof(tempAddress));
     
-    //[sysUtil getSockName:session.controlFd_ pSockAddrPtr:&tempAddress];
-    [sysUtil getSockName:P_COMMAND_FD pSockAddrPtr:&tempAddress];
-    if (session.pLocalAddress_ == NULL) {
-        session.pLocalAddress_ = (struct Psockaddr*)malloc(sizeof(struct Psockaddr));
-		fprintf(stderr, "session.pLocalAddress_ %p", session.pLocalAddress_);
+    length = sizeof(tempAddress);
+    if (getsockname(P_COMMAND_FD, &tempAddress, &length) == 0) {
+        if (session.pLocalAddress_ == NULL) {
+            session.pLocalAddress_ = (struct Psockaddr*)malloc(sizeof(struct Psockaddr));
+            fprintf(stderr, "session.pLocalAddress_ %p", session.pLocalAddress_);
+        }
+        memcpy(session.pLocalAddress_, &tempAddress, sizeof(tempAddress));
+        NSLog(@"getsockname successful.");
     }
-    memcpy(session.pLocalAddress_, &tempAddress, sizeof(tempAddress));
-    
     
     /*
      if (anonymousEnabled) {
@@ -83,8 +86,6 @@
     PPostLogin* postLogin = [[PPostLogin alloc] init];
     int ret;
 
-    //[param release];
-    
     NSLog(@"Port = %d", session.dataPort_);
     
     @try {
@@ -187,7 +188,10 @@
                 
             } else if ([session.reqCommand_ isEqualToString:@"HELP"]) {
                 [postLogin handleHELP:session];
-                
+
+            } else if ([session.reqCommand_ isEqualToString:@"NOOP"]) {
+                [postLogin handleNOOP:session];
+
             } else {
                 [postLogin handleUNKNOWN:session];
             }

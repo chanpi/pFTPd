@@ -11,6 +11,7 @@
 
 #define FTP_DATACONN        150
 
+#define FTP_NOOPOK          200
 #define FTP_PORTOK          200
 #define FTP_TYPEOK          200
 #define FTP_EPSVALLOK       200

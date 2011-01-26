@@ -59,22 +59,26 @@
 
 - (void) getDirectoryAttributes:(NSMutableString**)infoBuffer directoryPath:(NSString*)directoryPath {
     NSFileManager* fileManager = [NSFileManager defaultManager];
-    NSArray* files = [fileManager contentsOfDirectoryAtPath:directoryPath error:nil];
+    NSMutableArray* files = [[NSMutableArray alloc] initWithArray:[fileManager contentsOfDirectoryAtPath:directoryPath error:nil]];
+    
+    if ([directoryPath isEqualToString:@"/"] == NO) {
+        [files insertObject:@"." atIndex:0];
+        [files insertObject:@".." atIndex:1];
+    }
+    
     int count = [files count];
     NSString* filePath;
     
     int digit = 0;  // 10進数の桁数
     long tempWidth = 0;
-    long referenceWidth = 0;
-    long fileOwnerWidth = 0;
-    long groupOwnerWidth = 0;
-    long sizeWidth = 0;
+    long referenceWidth = 5;
+    long fileOwnerWidth = 10;
+    long groupOwnerWidth = 10;
+    long sizeWidth = 10;
     
+    /*
     // 各項目の表示幅を決定するために事前にチェック
     for (int i = 0; i < count; i++) {
-        if ([[files objectAtIndex:i] characterAtIndex:0] == '.') {
-            continue;
-        }
         filePath = [NSString stringWithFormat:@"%@%@", directoryPath, [files objectAtIndex:i]];
         NSLog(@"filePath = %@", filePath);
         NSDictionary* attributes = [fileManager attributesOfItemAtPath:filePath error:nil];
@@ -109,11 +113,18 @@
             sizeWidth = digit;
         }
     }
+    NSLog(@"refW %ld", referenceWidth);
+    NSLog(@"fileOwnerWidth %ld", fileOwnerWidth);
+    NSLog(@"groupOwnerWidth %ld", groupOwnerWidth);
+    NSLog(@"sizeWidth %ld", sizeWidth);
+    */
     
     for (int i = 0; i < count; i++) {
+        /*
         if ([[files objectAtIndex:i] characterAtIndex:0] == '.') {
             continue;
         }
+         */
         if ([directoryPath characterAtIndex:[directoryPath length]-1] != '/') {
             filePath = [NSString stringWithFormat:@"%@/%@", directoryPath, [files objectAtIndex:i]];
         } else {
@@ -361,7 +372,7 @@
 
 - (void) convertModifiedDate:(NSString**)buffer date:(NSDate*)date {
     // date: "2010-11-17 09:29:18 +0000"
-    NSString* format = @"MM/dd";
+    NSString* format = @"MM dd";
     
     NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
     [formatter setDateFormat:format];
