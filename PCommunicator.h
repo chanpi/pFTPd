@@ -8,10 +8,11 @@
 
 #import <Foundation/Foundation.h>
 #import "PSession.h"
+#import "PPrivilegeSocket.h"
 
 @interface PCommunicator : NSObject {
  @private
-    
+    PPrivilegeSocket* priv_;
 }
 
 - (void) communicate:(id)param;

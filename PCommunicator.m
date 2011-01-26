@@ -11,7 +11,6 @@
 #import "PPreLogin.h"
 #import "PPostLogin.h"
 #import "PSysUtil.h"
-#import "PPrivilegeSocket.h"
 #import "PCodes.h"
 #import "PDefs.h"
 
@@ -27,6 +26,12 @@
 
 
 @implementation PCommunicator
+
+- (id) init {
+	self = [super init];
+	priv_ = [[PPrivilegeSocket alloc] init];
+	return self;
+}
 
 - (void) sessionInitialize:(PSession*)session {
     PSysUtil* sysUtil = [[PSysUtil alloc] init];
@@ -47,6 +52,7 @@
     [sysUtil getPeerName:P_COMMAND_FD pSockAddrPtr:&tempAddress];
     if (session.pRemoteAddress_ == NULL) {
         session.pRemoteAddress_ = (struct Psockaddr*)malloc(sizeof(struct Psockaddr));
+		fprintf(stderr, "session.pRemoteAddress_ %p", session.pRemoteAddress_);
     }
     memcpy(session.pRemoteAddress_, &tempAddress, sizeof(tempAddress));
     
@@ -54,6 +60,7 @@
     [sysUtil getSockName:P_COMMAND_FD pSockAddrPtr:&tempAddress];
     if (session.pLocalAddress_ == NULL) {
         session.pLocalAddress_ = (struct Psockaddr*)malloc(sizeof(struct Psockaddr));
+		fprintf(stderr, "session.pLocalAddress_ %p", session.pLocalAddress_);
     }
     memcpy(session.pLocalAddress_, &tempAddress, sizeof(tempAddress));
     
@@ -76,7 +83,7 @@
     PPostLogin* postLogin = [[PPostLogin alloc] init];
     int ret;
 
-    [param release];
+    //[param release];
     
     NSLog(@"Port = %d", session.dataPort_);
     
@@ -103,6 +110,12 @@
         while (1) {
             // request
             ret = [ctrlIO getRequest:session];
+            if (ret == -1) {
+                // タイムアウトでセッションが切断されている可能性があるため返信できない
+                [session.reqCommand_ release];
+                [session.reqMessage_ release];
+                break;
+            }
             
             NSLog(@"[req] %@ %@", session.reqCommand_, session.reqMessage_);
             
@@ -111,11 +124,13 @@
                 [preLogin handleUSER:session];
                 
             } else if ([session.reqCommand_ isEqualToString:@"PASS"]) {
+				//[preLogin handlePASS:session];
+				
                 if ([preLogin handlePASS:session]) {
                     [preLogin release];
                     preLogin = nil;
                 }
-                
+				                
             } else if ([session.reqCommand_ isEqualToString:@"SYST"]) {
                 [postLogin handleSYST:session];
                 
@@ -142,8 +157,8 @@
                        [session.reqCommand_ isEqualToString:@"P@SW"]) {
                 [postLogin handlePASV:session isEPSV:NO];
                 
-            } else if ([session.reqCommand_ isEqualToString:@"EPSV"]) {
-                [postLogin handlePASV:session isEPSV:YES];
+//            } else if ([session.reqCommand_ isEqualToString:@"EPSV"]) {
+//                [postLogin handlePASV:session isEPSV:YES];
                 
             } else if ([session.reqCommand_ isEqualToString:@"TYPE"]) {
                 [postLogin handleTYPE:session];
@@ -151,7 +166,8 @@
             } else if ([session.reqCommand_ isEqualToString:@"LIST"]) {
                 [postLogin handleLIST:session];
                 
-            } else if ([session.reqCommand_ isEqualToString:@"NLIST"]) {
+            } else if ([session.reqCommand_ isEqualToString:@"NLIST"] ||
+                       [session.reqCommand_ isEqualToString:@"NLST"]) {
                 [postLogin handleNLIST:session];
                 
             } else if ([session.reqCommand_ isEqualToString:@"SIZE"]) {
@@ -179,7 +195,7 @@
             [session.reqCommand_ release];
             [session.reqMessage_ release];
             
-            if (ret == -1 || session.resCode_ == FTP_GOODBYE) {
+            if (session.resCode_ == FTP_GOODBYE) {
                 break;
             }
         }
@@ -187,66 +203,70 @@
     @catch (NSException *exception) {
         NSLog(@"[ERROR] %@ communicate: %@: %@", NSStringFromClass([self class]), [exception name], [exception reason]);
     }
-
-    close(session.controlFd_);
-    
-    if (session.readStream_ != NULL) {
-        CFReadStreamClose(session.readStream_);
-        session.readStream_ = NULL;
-    }
-    if (session.writeStream_ != NULL) {
-        CFWriteStreamClose(session.writeStream_);
-        session.writeStream_ = NULL;
-    }
-    
-    if (preLogin != nil) {
-        [preLogin release];
-        preLogin = nil;
-    }
-    
-    [ctrlIO release];
-    [postLogin release];
-    [session release];  // 必ずrelease
-    [pool release];
+	@finally {
+		close(session.controlFd_);
+		
+		if (session.readStream_ != NULL) {
+			CFReadStreamClose(session.readStream_);
+			session.readStream_ = NULL;
+		}
+		if (session.writeStream_ != NULL) {
+			CFWriteStreamClose(session.writeStream_);
+			session.writeStream_ = NULL;
+		}
+		
+		if (preLogin != nil) {
+			[preLogin release];
+			preLogin = nil;
+		}
+        
+		[ctrlIO release];
+		[postLogin release];
+		[session release];  // 必ずrelease
+		[pool release];		
+	}
 }
 
 
 - (int) getPasvFd:(PSession*)session {
-    PPrivilegeSocket* priv = [[PPrivilegeSocket alloc] init];
     char res;
     int recvFd;
-    [priv sendCommand:session.controlFd_ command:PRIV_SOCK_PASV_ACCEPT];
-    res = [priv getResult:session.controlFd_];
+    [priv_ sendCommand:session.controlFd_ command:PRIV_SOCK_PASV_ACCEPT];
+    res = [priv_ getResult:session.controlFd_];
     if (res == PRIV_SOCK_RESULT_BAD) {
-        return [priv getInt:session.controlFd_];
+        recvFd = [priv_ getInt:session.controlFd_];
     } else if (res != PRIV_SOCK_RESULT_OK) {
         NSLog(@"could not accept on listening socket");
-    }
-    recvFd = [priv recvFd:session.controlFd_];
-    [priv release];
+		recvFd = -1;
+    } else {
+		recvFd = [priv_ recvFd:session.controlFd_];
+	}
     return recvFd;
 }
 
 - (int) getPrivDataSocket:(PSession*)session {
     PSysUtil* sysUtil = [[PSysUtil alloc] init];
-    PPrivilegeSocket* priv = [[PPrivilegeSocket alloc] init];
     char res;
     int recvFd;
     unsigned short port = [sysUtil sockaddrGetPort:session.pPortSockAddress_];
-    [priv sendCommand:session.controlFd_ command:PRIV_SOCK_GET_DATA_SOCK];
-    [priv sendInt:session.controlFd_ theInt:port];
-    res = [priv getResult:session.controlFd_];
+    [priv_ sendCommand:session.controlFd_ command:PRIV_SOCK_GET_DATA_SOCK];
+    [priv_ sendInt:session.controlFd_ theInt:port];
+    res = [priv_ getResult:session.controlFd_];
     if (res == PRIV_SOCK_RESULT_BAD) {
         recvFd = -1;
     } else if (res != PRIV_SOCK_RESULT_OK) {
         NSLog(@"[ERROR] could not get privileged socket");
         recvFd = -1;
-    }
-    recvFd = [priv recvFd:session.controlFd_];
-    [priv release];
+    } else {
+		recvFd = [priv_ recvFd:session.controlFd_];
+	}
     [sysUtil release];
     return recvFd;
 }
 
+- (void) dealloc {
+	[priv_ release];
+	[super dealloc];
+}
 
 @end

@@ -14,6 +14,12 @@
 #include <netinet/ip.h>
 #include <sys/uio.h>
 
+@interface PSysUtil (Local)
+- (void) convertFilePermissionToString:(NSString**)buffer permission:(int)permission;
+- (void) convertModifiedDate:(NSString**)buffer date:(NSDate*)date;
+- (void) convertModifiedTime:(NSString**)buffer date:(NSDate*)date;
+@end
+
 @implementation PSysUtil
 
 - (void) dupFd2:(CFSocketNativeHandle)oldFd newFd:(CFSocketNativeHandle)newFd {
@@ -48,6 +54,126 @@
         return YES;
     }
     return NO;
+}
+
+
+- (void) getDirectoryAttributes:(NSMutableString**)infoBuffer directoryPath:(NSString*)directoryPath {
+    NSFileManager* fileManager = [NSFileManager defaultManager];
+    NSArray* files = [fileManager contentsOfDirectoryAtPath:directoryPath error:nil];
+    int count = [files count];
+    NSString* filePath;
+    
+    int digit = 0;  // 10進数の桁数
+    long tempWidth = 0;
+    long referenceWidth = 0;
+    long fileOwnerWidth = 0;
+    long groupOwnerWidth = 0;
+    long sizeWidth = 0;
+    
+    // 各項目の表示幅を決定するために事前にチェック
+    for (int i = 0; i < count; i++) {
+        if ([[files objectAtIndex:i] characterAtIndex:0] == '.') {
+            continue;
+        }
+        filePath = [NSString stringWithFormat:@"%@%@", directoryPath, [files objectAtIndex:i]];
+        NSLog(@"filePath = %@", filePath);
+        NSDictionary* attributes = [fileManager attributesOfItemAtPath:filePath error:nil];
+        
+        tempWidth = [[attributes objectForKey:NSFileReferenceCount] longValue];
+        digit = 0;
+        while ((tempWidth /= 10) > 0) {
+            digit++;
+        }
+        digit++;
+        if (digit > referenceWidth) {
+            referenceWidth = digit;
+        }
+        
+        tempWidth = [[attributes objectForKey:NSFileOwnerAccountName] length];
+        if (tempWidth > fileOwnerWidth) {
+            fileOwnerWidth = tempWidth;
+        }
+        
+        tempWidth = [[attributes objectForKey:NSFileGroupOwnerAccountName] length];
+        if (tempWidth > groupOwnerWidth) {
+            groupOwnerWidth = tempWidth;
+        }
+        
+        tempWidth = [[attributes objectForKey:NSFileSize] longValue];
+        digit = 0;
+        while ((tempWidth /= 10) > 0) {
+            digit++;
+        }
+        digit++;
+        if (digit > sizeWidth) {
+            sizeWidth = digit;
+        }
+    }
+    
+    for (int i = 0; i < count; i++) {
+        if ([[files objectAtIndex:i] characterAtIndex:0] == '.') {
+            continue;
+        }
+        if ([directoryPath characterAtIndex:[directoryPath length]-1] != '/') {
+            filePath = [NSString stringWithFormat:@"%@/%@", directoryPath, [files objectAtIndex:i]];
+        } else {
+            filePath = [NSString stringWithFormat:@"%@%@", directoryPath, [files objectAtIndex:i]];
+        }
+        NSDictionary* attributes = [fileManager attributesOfItemAtPath:filePath error:nil];
+        if (attributes == nil) {
+            continue;
+        }
+        
+        // ディレクトリか
+        NSString* temp = [attributes objectForKey:NSFileType];
+        if ([temp isEqualToString:NSFileTypeDirectory]) {
+            [*infoBuffer appendString:@"d"];
+        } else if ([temp isEqualToString:NSFileTypeSymbolicLink]) {
+            [*infoBuffer appendString:@"l"];
+        } else {
+            [*infoBuffer appendString:@"-"];
+        }
+        
+        // ファイル権限
+        [self convertFilePermissionToString:&temp permission:[[attributes objectForKey:NSFilePosixPermissions] intValue]];
+        [*infoBuffer appendFormat:@"%@ ", temp];
+        
+        // NSFileReferenceCount
+        NSString* format;
+        format = [NSString stringWithFormat:@"%%%ldld ", referenceWidth];    // -> @"%2ld "など
+        [*infoBuffer appendFormat:format, [[attributes objectForKey:NSFileReferenceCount] longValue]];
+        
+        // NSFileOwnerAccountName
+        temp = [attributes objectForKey:NSFileOwnerAccountName];
+        [*infoBuffer appendString:temp];
+        int length = [temp length];
+        for (int i = length; i < fileOwnerWidth+2; i++) {
+            [*infoBuffer appendString:@" "];
+        }
+        
+        // NSFileGroupOwnerAccountName
+        temp = [attributes objectForKey:NSFileGroupOwnerAccountName];
+        [*infoBuffer appendString:temp];
+        length = [temp length];
+        for (int i = length; i < groupOwnerWidth+2; i++) {
+            [*infoBuffer appendString:@" "];
+        }
+        
+        // NSFileSize
+        format = [NSString stringWithFormat:@"%%%ldld ", sizeWidth];
+        [*infoBuffer appendFormat:format, [[attributes objectForKey:NSFileSize] longValue]];
+        
+        // 日付 (Jan 18)
+        [self convertModifiedDate:&temp date:[attributes objectForKey:NSFileModificationDate]];
+        [*infoBuffer appendFormat:@"%@ ", temp];
+        
+        // 時間 (11:15)
+        [self convertModifiedTime:&temp date:[attributes objectForKey:NSFileModificationDate]];
+        [*infoBuffer appendFormat:@"%@ ", temp];
+        
+        // FileName
+        [*infoBuffer appendFormat:@"%@\r\n", [files objectAtIndex:i]];
+    }
 }
 
 - (void) getPeerName:(int)fd pSockAddrPtr:(struct Psockaddr*)pSockAddr {
@@ -212,5 +338,47 @@
 - (int) closeFailOK:(int)fd {
     return close(fd);
 }
+
+
+
+
+- (void) convertFilePermissionToString:(NSString**)buffer permission:(int)permission {
+    char tempPermittion[9+1] = {0}; //user[rwx]/group[rwx]/other[rwx] +1はNSStringへのコンバート用
+    tempPermittion[8] = (permission & 0x1) ? 'x' : '-', permission >>= 1;
+    tempPermittion[7] = (permission & 0x1) ? 'w' : '-', permission >>= 1;
+    tempPermittion[6] = (permission & 0x1) ? 'r' : '-', permission >>= 1;
+    
+    tempPermittion[5] = (permission & 0x1) ? 'x' : '-', permission >>= 1;
+    tempPermittion[4] = (permission & 0x1) ? 'w' : '-', permission >>= 1;
+    tempPermittion[3] = (permission & 0x1) ? 'r' : '-', permission >>= 1;
+    
+    tempPermittion[2] = (permission & 0x1) ? 'x' : '-', permission >>= 1;
+    tempPermittion[1] = (permission & 0x1) ? 'w' : '-', permission >>= 1;
+    tempPermittion[0] = (permission & 0x1) ? 'r' : '-';
+    
+    *buffer = [NSString stringWithUTF8String:tempPermittion];
+}
+
+- (void) convertModifiedDate:(NSString**)buffer date:(NSDate*)date {
+    // date: "2010-11-17 09:29:18 +0000"
+    NSString* format = @"MMM dd";
+    
+    NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
+    [formatter setDateFormat:format];
+    
+    *buffer = [formatter stringFromDate:date];
+    [formatter release];
+}
+
+- (void) convertModifiedTime:(NSString**)buffer date:(NSDate*)date {
+    NSString* format = @"HH:mm";
+    
+    NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
+    [formatter setDateFormat:format];
+    
+    *buffer = [formatter stringFromDate:date];
+    [formatter release];
+}
+
 
 @end

@@ -19,6 +19,7 @@
 - (unsigned short) sockaddrGetPort:(const struct Psockaddr*)pSockPtr;
 - (BOOL) sockaddrIsIPv6:(const struct sockaddr*)pSockAddress;
 
+- (void) getDirectoryAttributes:(NSMutableString**)infoBuffer directoryPath:(NSString*)directoryPath;
 - (void) getPeerName:(int)fd pSockAddrPtr:(struct Psockaddr*)pSockAddr;
 - (void) getSockName:(int)fd pSockAddrPtr:(struct Psockaddr*)pSockAddr;
 - (void) activateKeepAlive:(int)fd;

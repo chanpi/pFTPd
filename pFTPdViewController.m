@@ -74,7 +74,7 @@
 }
 
 - (IBAction) pressedStop:(id)sender {
-    
+    [ftpMain_ stopListening];
 }
 
 @end

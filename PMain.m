@@ -7,7 +7,6 @@
 //
 
 #import "PMain.h"
-#import "PCommunicator.h"
 #import "PSession.h"
 #import <CFNetwork/CFNetwork.h>
 
@@ -18,10 +17,13 @@
 #include <unistd.h>
 #include <stdlib.h>
 
+PCommunicator* communicator_;
+
 @implementation PMain
 
 @synthesize commandPort_;
 @synthesize dataPort_;
+@synthesize listenSocket_;
 
 static void AcceptCallback(CFSocketRef socket, CFSocketCallBackType type, CFDataRef address, const void* data, void* info) {
     // Thread Parameter
@@ -29,21 +31,20 @@ static void AcceptCallback(CFSocketRef socket, CFSocketCallBackType type, CFData
     session.controlFd_ = *(CFSocketNativeHandle *)data;
     session.controlPort_ = *(unsigned short*)info;
 
-    // get command
-    PCommunicator* communicator = [[PCommunicator alloc] init];
-    [NSThread detachNewThreadSelector:@selector(communicate:) toTarget:communicator withObject:session];
-    [communicator release];
+    // get commandfd
+    [NSThread detachNewThreadSelector:@selector(communicate:) toTarget:communicator_ withObject:session];
 }
 
 
 - (BOOL) ftpdStart:(int)commandPort remote:(int)dataPort {
-    CFSocketRef listenSocket;
     CFSocketContext context;
     int yes = 1;    // setsockopt
     struct sockaddr_in addr;    // listen port&address
     
     self.commandPort_ = commandPort;
     self.dataPort_ = dataPort;
+	
+	communicator_ = [[PCommunicator alloc] init];
     
     // set context (with data port)
     context.version = 0;
@@ -53,14 +54,14 @@ static void AcceptCallback(CFSocketRef socket, CFSocketCallBackType type, CFData
     context.copyDescription = NULL;
     
     // create socket
-    listenSocket = CFSocketCreate(kCFAllocatorDefault, PF_INET, SOCK_STREAM, IPPROTO_TCP, kCFSocketAcceptCallBack, (CFSocketCallBack)&AcceptCallback, &context);
-    if (listenSocket == NULL) {
+    listenSocket_ = CFSocketCreate(kCFAllocatorDefault, PF_INET, SOCK_STREAM, IPPROTO_TCP, kCFSocketAcceptCallBack, (CFSocketCallBack)&AcceptCallback, &context);
+    if (listenSocket_ == NULL) {
         NSLog(@"[ERROR] CFSocketCreate");
         return NO;
     }
     
     // TIME_WAIT状態の場合、ローカルアドレスを再利用
-    setsockopt(CFSocketGetNative(listenSocket), SOL_SOCKET, SO_REUSEADDR, (void*)&yes, sizeof(yes));
+    setsockopt(CFSocketGetNative(listenSocket_), SOL_SOCKET, SO_REUSEADDR, (void*)&yes, sizeof(yes));
     
     // bind/listen
     addr.sin_len = sizeof(addr);
@@ -70,16 +71,24 @@ static void AcceptCallback(CFSocketRef socket, CFSocketCallBackType type, CFData
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
     
     NSData* address = [NSData dataWithBytes:&addr length:sizeof(addr)];
-    if (CFSocketSetAddress(listenSocket, (CFDataRef)address) != kCFSocketSuccess) {
+    if (CFSocketSetAddress(listenSocket_, (CFDataRef)address) != kCFSocketSuccess) {
         NSLog(@"[ERROR] CFSocketSetAddress");
-        CFRelease(listenSocket);
+        CFRelease(listenSocket_);
         return NO;
     }
     
-    CFRunLoopSourceRef sourceRef = CFSocketCreateRunLoopSource(kCFAllocatorDefault, listenSocket, 0);
+    CFRunLoopSourceRef sourceRef = CFSocketCreateRunLoopSource(kCFAllocatorDefault, listenSocket_, 0);
     CFRunLoopAddSource(CFRunLoopGetCurrent(), sourceRef, kCFRunLoopCommonModes);
-    CFRelease(listenSocket);    
+	CFRelease(sourceRef);
+	
+	CFRunLoopRun();
+	
     return TRUE;
+}
+
+- (void) stopListening {
+	close(CFSocketGetNative(listenSocket_));
+	[communicator_ release];
 }
 
 @end

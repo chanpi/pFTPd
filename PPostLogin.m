@@ -57,6 +57,7 @@
         [ctrlIO_ writeResponseRaw:session];
     }
      */
+    /*
     
 //    if (portEnable) {
         session.resMessage_ = @" EPRT\r\n";
@@ -75,6 +76,7 @@
         session.resMessage_ = @" PASV\r\n";
         [ctrlIO_ writeResponseRaw:session];
 //    }
+     */
     
     /*
     if (sslEnable) {
@@ -84,14 +86,18 @@
         [ctrlIO_ writeResponseRaw:session];
     }
      */
+    /*
     session.resMessage_ = @" REST STREAM\r\n";
     [ctrlIO_ writeResponseRaw:session];
+     */
     session.resMessage_ = @" SIZE\r\n";
     [ctrlIO_ writeResponseRaw:session];
+    /*
     session.resMessage_ = @" TVFS\r\n";
     [ctrlIO_ writeResponseRaw:session];
     session.resMessage_ = @" UTF8\r\n";
     [ctrlIO_ writeResponseRaw:session];
+     */
     
     session.resCode_ = FTP_FEAT;
     session.resMessage_ = @"End";
@@ -104,6 +110,7 @@
     if (pwd != NULL) {
         session.resMessage_ = [NSString stringWithUTF8String:path];
     } else {
+        NSLog(@"getcwd = NULL!!!");
         session.resMessage_ = @"/";
     }
     session.resCode_ = FTP_PWDOK;
@@ -115,6 +122,7 @@
         session.resCode_ = FTP_CWDOK;
         session.resMessage_ = @"Directory successfully changed.";
     } else {
+        NSLog(@"[ERROR] chdir");
         session.resCode_ = FTP_FILEFAIL;
         session.resMessage_ = @"Failed to change directory.";
     }
@@ -122,7 +130,8 @@
 }
 
 - (void) handleCDUP:(PSession*)session {
-    session.reqMessage_ = @"..";
+    [session.reqMessage_ release];  // 元々allocされているので一度releaseしている
+    session.reqMessage_ = [[NSString alloc] initWithString:@".."];
     [self handleCWD:session];
 }
 
@@ -160,7 +169,10 @@
         [ctrlIO_ sendResponseNormal:session];
         return;
     }
-    isIPv6 = [[[PSysUtil alloc] init] sockaddrIsIPv6:(const struct sockaddr*)(session.pLocalAddress_)];
+    
+    PSysUtil* sysUtil = [[PSysUtil alloc] init];
+    isIPv6 = [sysUtil sockaddrIsIPv6:(const struct sockaddr*)(session.pLocalAddress_)];
+    [sysUtil release];
     
     if (isEPSV && [session.reqMessage_ length] != 0) {
         int argval;
@@ -182,14 +194,32 @@
         }
     }
     
-    [self pasvCleanup:session];
-    [self portCleanup:session];
+    //[self pasvCleanup:session];
+    //[self portCleanup:session];
     
-    [self listenPasvSocket:session];
+    //[self listenPasvSocket:session];
+    pasvPort = 23451;
     
     if (isEPSV) {
         session.resCode_ = FTP_EPSVOK;
         session.resMessage_ = [NSString stringWithFormat:@"Entering Extended Passive Mode (|||%ld|).", (unsigned long)pasvPort];
+        [ctrlIO_ sendResponseNormal:session];
+        return;
+    } else {
+        /*
+        char localAddress[32] = {0};
+        char *pReplace = NULL;
+        NSLog(@"%d", session.pPortSockAddress_->u.u_sockaddr_in.sin_addr.s_addr);
+        strcpy(localAddress, inet_ntoa(session.pPortSockAddress_->u.u_sockaddr_in.sin_addr));
+        fprintf(stderr, "[%s]\n", localAddress);
+        
+        while ((pReplace = strchr(localAddress, '.')) != NULL) {
+            *pReplace = ',';
+        }
+        */
+        
+        session.resCode_ = FTP_PASVOK;
+        session.resMessage_ = [NSString stringWithFormat:@"Entering Passive Mode. 10,0,6,147,%d,%d", 0xff & pasvPort>>8, 0xff & pasvPort];
         [ctrlIO_ sendResponseNormal:session];
         return;
     }
@@ -230,6 +260,61 @@
 }
 
 - (void) handleDirCommon:(PSession *)session fullDetailes:(BOOL)fullDetailes statCommand:(BOOL)statCommand {
+    int error;
+    NSString* dirPath = session.reqMessage_;
+    if (dirPath == nil) {
+        char currentDirectory[32];
+        if (getcwd(currentDirectory, sizeof(currentDirectory)) != NULL) {
+            dirPath = [NSString stringWithUTF8String:currentDirectory];
+        } else {
+            session.resCode_ = FTP_BADSENDFILE;
+            session.resMessage_ = @"Failed to get current directory.";
+            [ctrlIO_ sendResponseNormal:session];
+            return;
+        }
+    }
+    
+    NSLog(@"currentDir = %@", dirPath);
+    
+    NSMutableString* directory = [[NSMutableString alloc] init];
+    PSysUtil* sysUtil = [[PSysUtil alloc] init];
+    [sysUtil getDirectoryAttributes:&directory directoryPath:dirPath];
+    NSLog(@"%@", directory);
+    [sysUtil release];
+    
+    // リモートアドレスの設定
+    session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (session.dataFd_ < 0) {
+        NSLog(@"[ERROR] Failed to create socket() in handleDirCommon.");
+        session.resCode_ = FTP_BADSENDCONN;
+        session.resMessage_ = @"Failed to create data socket.";
+        [ctrlIO_ sendResponseNormal:session];
+        return;
+    }
+    
+    // データ接続をオープンしようとすることを知らせる
+    session.resCode_ = FTP_DATACONN;
+    session.resMessage_ = @"Here comes the directory listing.";
+    [ctrlIO_ sendResponseNormal:session];
+    
+    error = connect(session.dataFd_, (const struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in));
+    if (error < 0) {
+        NSLog(@"[ERROR] Can't open data connection.");
+        session.resCode_ = FTP_BADSENDCONN;
+        session.resMessage_ = @"Can't open data connection.";
+        [ctrlIO_ sendResponseNormal:session];
+        return;
+    }
+    
+    [dataIO_ sendData:session data:[directory UTF8String] dataSize:[directory length]];
+    session.resCode_ = FTP_TRANSFEROK;
+    session.resMessage_ = @"Directory send OK.";
+    [ctrlIO_ sendResponseNormal:session];
+    
+    close(session.dataFd_);
+    [directory release];
+
+    /*
     char commandBuffer[512];
     FILE* fp;
     int error;
@@ -279,6 +364,7 @@
     while (1) {
         memset(commandBuffer, 0x00, sizeof(commandBuffer));
         fgets(commandBuffer, sizeof(commandBuffer), fp);
+        fprintf(stderr, "%s", commandBuffer);
         if (feof(fp)) {
             session.resCode_ = FTP_TRANSFEROK;
             session.resMessage_ = @"Directory send OK.";
@@ -291,6 +377,7 @@
     }
     pclose(fp);
     close(session.dataFd_);
+     */
 }
 
 - (void) handleSIZE:(PSession*)session {
@@ -545,7 +632,7 @@
 }
 
 - (void) handleUNKNOWN:(PSession*)session {
-    session.resCode_ = FTP_GOODBYE;
+    session.resCode_ = FTP_COMMANDNOTIMPL;
     session.resMessage_ = [NSString stringWithFormat:@"[Unsupported] %@", session.reqCommand_];
     [ctrlIO_ sendResponseNormal:session];
 }

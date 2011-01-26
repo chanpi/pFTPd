@@ -76,13 +76,13 @@
         free(pLocalAddress_);
         pLocalAddress_ = NULL;
     }
-    if (pRemoteAddress_ != NULL) {
-        free(pRemoteAddress_);
-        pRemoteAddress_ = NULL;
-    }
     if (pPortSockAddress_ != NULL) {
         free(pPortSockAddress_);
         pPortSockAddress_ = NULL;
+    }
+    if (pRemoteAddress_ != NULL) {
+        free(pRemoteAddress_);
+        pRemoteAddress_ = NULL;
     }
     [super dealloc];
 }

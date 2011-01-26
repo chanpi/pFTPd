@@ -24,13 +24,12 @@
     while (!strchr((char*)buffer, '\n') && recvLen < size) {
         bytes = CFReadStreamRead(session.readStream_, buffer + recvLen, size - recvLen);
         if (bytes < 0) {
-            // TODO!!!!!
             CFErrorRef error = CFReadStreamCopyError(session.readStream_);
             CFIndex eIndex = CFErrorGetCode(error);
             CFStringRef eString = CFErrorCopyDescription(error);
-            NSLog(@"[ERROR] CFReadStreamRead() %d %@", eIndex, eString);
+            NSLog(@"[ERROR] CFReadStreamRead() %ld %@", eIndex, eString);
             session.reqCommand_ = [[NSString alloc] initWithString:@"ERROR"];
-            session.reqMessage_ = [[NSString alloc] initWithString:@"ERROR"];
+            session.reqMessage_ = [[NSString alloc] initWithString:(NSString*)eString];
             return -1;
         }
         recvLen += bytes;
@@ -46,8 +45,9 @@
 
 
 - (unsigned long) sendResponse:(PSession*)session {
-    NSString* temp = [[NSString alloc] initWithFormat:@"%d%@%@\r\n", session.resCode_, session.resSep_, session.resMessage_];
-    const char* buffer = [temp UTF8String];
+    //NSString* temp = [[NSString alloc] initWithFormat:@"%d%@%@\r\n", session.resCode_, session.resSep_, session.resMessage_];
+    NSString* temp = [NSString stringWithFormat:@"%d%@%@\r\n", session.resCode_, session.resSep_, session.resMessage_];
+	const char* buffer = [temp UTF8String];
     unsigned long sendLen = 0;
     UInt8 count = strlen(buffer);
     int bytes;
