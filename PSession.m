@@ -25,6 +25,7 @@
 
 @synthesize isAscii_;
 @synthesize isEpsvAll_;
+@synthesize isPasv_;
 
 @synthesize reqCommand_;
 @synthesize reqMessage_;
@@ -53,8 +54,10 @@
     pPortSockAddress_ = NULL;
 
     isAnonymous_ = YES;
+    
     isAscii_ = NO;
     isEpsvAll_ = NO;
+    isPasv_ = NO;
     
     reqMessage_ = nil;
     reqMessage_ = nil;

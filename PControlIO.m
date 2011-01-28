@@ -30,6 +30,8 @@
             NSLog(@"[ERROR] CFReadStreamRead() %ld %@", eIndex, eString);
             session.reqCommand_ = [[NSString alloc] initWithString:@"ERROR"];
             session.reqMessage_ = [[NSString alloc] initWithString:(NSString*)eString];
+            CFRelease(error);
+            
             return -1;
         }
         recvLen += bytes;
@@ -60,7 +62,8 @@
             CFErrorRef error = CFWriteStreamCopyError(session.writeStream_);
             CFIndex eIndex = CFErrorGetCode(error);
             CFStringRef eString = CFErrorCopyDescription(error);
-            NSLog(@"[ERROR] CFWriteStreamWrite() %d %@", eIndex, eString);
+            NSLog(@"[ERROR] CFWriteStreamWrite() %ld %@", eIndex, eString);
+            CFRelease(error);
             return 0;
         }
         sendLen += bytes;
@@ -100,7 +103,8 @@
             CFErrorRef error = CFWriteStreamCopyError(session.writeStream_);
             CFIndex eIndex = CFErrorGetCode(error);
             CFStringRef eString = CFErrorCopyDescription(error);
-            NSLog(@"[ERROR] CFWriteStreamWrite() %d %@", eIndex, eString);
+            NSLog(@"[ERROR] CFWriteStreamWrite() %ld %@", eIndex, eString);
+            CFRelease(error);
             return 0;
         }
         sendLen += bytes;

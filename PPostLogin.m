@@ -184,6 +184,7 @@
             session.resCode_ = FTP_EPSVALLOK;
             session.resMessage_ = @"EPSV All OK.";
             [ctrlIO_ sendResponseNormal:session];
+            //session.isPasv_ = YES;
             return;
         }
         
@@ -199,7 +200,7 @@
     //[self pasvCleanup:session];
     //[self portCleanup:session];
     
-    pasvPort = [self listenPasvSocket:session];
+    pasvPort = [self listenPasvSocket:session]; // create pasv socket. bind & listen.
     if (pasvPort == 0) {    // ERROR
         return;
     }
@@ -221,6 +222,8 @@
             }
             p++;
         }
+        
+        session.isPasv_ = YES;
         
         session.resCode_ = FTP_PASVOK;
         session.resMessage_ = [NSString stringWithFormat:@"Entering Passive Mode. %@,%d,%d",
@@ -317,6 +320,8 @@
     
     close(session.dataFd_);
     close(session.pasvListenFd_);
+    session.dataFd_ = session.pasvListenFd_ = -1;
+    
     [directory release];
 }
 
@@ -393,6 +398,8 @@
     // TODO
     // 
     
+    session.isPasv_ = NO;
+    
     session.resCode_ = FTP_PORTOK;
     session.resMessage_ = @"PORT command successful. Consider using PASV.";
     [ctrlIO_ sendResponseNormal:session];
@@ -451,37 +458,50 @@
                                session.isAscii_ ? @"Ascii" : @"Binary", session.reqMessage_, fileSize];  // TODO!!! handle_retr
         [ctrlIO_ sendResponseNormal:session];
         
-        session.dataFd_ = 0;
-        session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (session.dataFd_ < 0) {
-            NSLog(@"[ERROR] Failed to create data socket.");
-            session.resCode_ = FTP_FILEFAIL;
-            session.resMessage_ = @"Failed to create data socket.";
+        if (session.isPasv_) {
+            struct sockaddr_in address;
+            socklen_t sockLen = sizeof(address);
+
+            session.dataFd_ = accept(session.pasvListenFd_, (struct sockeaddr*)&address, &sockLen);
+            [dataIO_ sendFile:session fileHandle:fileHandle fileSize:fileSize];
             
-            NSException* ex = [NSException exceptionWithName:@"PException" reason:@"socket() : Failed to create data socket." userInfo:nil];
-            @throw ex;
-        }
-        
-        err = connect(session.dataFd_, (struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in));
-        if (err < 0) {
-            NSLog(@"[ERROR] Failed to connect to remote host.");
-            session.resCode_ = FTP_FILEFAIL;    // TODO!!!
-            session.resMessage_ = @"Failed to connect to remote host.";
+        } else {
+            session.dataFd_ = 0;
+            session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (session.dataFd_ < 0) {
+                NSLog(@"[ERROR] Failed to create data socket.");
+                session.resCode_ = FTP_FILEFAIL;
+                session.resMessage_ = @"Failed to create data socket.";
+                
+                NSException* ex = [NSException exceptionWithName:@"PException" reason:@"socket() : Failed to create data socket." userInfo:nil];
+                @throw ex;
+            }
             
-            NSException* ex = [NSException exceptionWithName:@"PException" reason:@"connect() : Failed to connect to remote host." userInfo:nil];
-            @throw ex;
+            err = connect(session.dataFd_, (struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in));
+            if (err < 0) {
+                NSLog(@"[ERROR] Failed to connect to remote host.");
+                session.resCode_ = FTP_FILEFAIL;    // TODO!!!
+                session.resMessage_ = @"Failed to connect to remote host.";
+                
+                NSException* ex = [NSException exceptionWithName:@"PException" reason:@"connect() : Failed to connect to remote host." userInfo:nil];
+                @throw ex;
+            }
+            
+            [dataIO_ sendFile:session fileHandle:fileHandle fileSize:fileSize];
         }
-        
-        [dataIO_ sendFile:session fileHandle:fileHandle fileSize:fileSize];
         
     }
     @catch (NSException *exception) {
         NSLog(@"[ERROR] %@ communicate: %@: %@", NSStringFromClass([self class]), [exception name], [exception reason]);
     }
 
-    if (session.dataFd_ != 0) {
+    if (session.dataFd_ > 0) {
         close(session.dataFd_);
-        session.dataFd_ = 0;
+        session.dataFd_ = -1;
+    }
+    if (session.pasvListenFd_ > 0) {
+        close(session.pasvListenFd_);
+        session.pasvListenFd_ = -1;
     }
     
     [ctrlIO_ sendResponseNormal:session];

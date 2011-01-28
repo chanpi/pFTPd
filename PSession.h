@@ -40,6 +40,7 @@ struct Psockaddr {
     // Details of th FTP protocol state
     BOOL isAscii_;
     BOOL isEpsvAll_;
+    BOOL isPasv_;
     
     // Request Buffers
     NSString* reqCommand_;
@@ -74,6 +75,7 @@ struct Psockaddr {
 
 @property (assign) BOOL isAscii_;
 @property (assign) BOOL isEpsvAll_;
+@property (assign) BOOL isPasv_;
 
 @property (assign) NSString* reqCommand_;
 @property (assign) NSString* reqMessage_;

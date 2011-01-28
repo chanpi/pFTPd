@@ -69,8 +69,8 @@
     int count = [files count];
     NSString* filePath;
     
-    int digit = 0;  // 10進数の桁数
-    long tempWidth = 0;
+    //int digit = 0;  // 10進数の桁数
+    //long tempWidth = 0;
     long referenceWidth = 5;
     long fileOwnerWidth = 10;
     long groupOwnerWidth = 10;
