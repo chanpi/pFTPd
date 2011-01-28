@@ -104,7 +104,7 @@
 //    [priv release];
 }
 
-- (unsigned long) sendData:(PSession*)session data:(const void*)data dataSize:(unsigned long)dataSize {
+- (int) sendData:(PSession*)session data:(const void*)data dataSize:(unsigned long)dataSize {
     unsigned long sendLen = 0;
     int bytes = 0;
     
@@ -125,7 +125,7 @@
     return sendLen;
 }
 
-- (unsigned long) sendFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle fileSize:(unsigned long)fileSize {
+- (int) sendFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle fileSize:(unsigned long)fileSize {
     unsigned long sendLen = 0;
     int bytes = 0;
     NSData* sendData = [fileHandle readDataToEndOfFile];
@@ -138,7 +138,7 @@
             NSLog(@"[ERROR] sendFile:fileHandle:fileSize;");
             session.resCode_ = FTP_BADSENDFILE;
             session.resMessage_ = @"[ERROR] sendFile()";
-            return 0;
+            return bytes;
         }
         sendLen += bytes;
     }
@@ -148,7 +148,7 @@
     return sendLen;
 }
 
-- (unsigned long) recvFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle {
+- (int) recvFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle {
     int bytes;
     unsigned long writeLen = 0;
     char recvBuffer[512] = {0};

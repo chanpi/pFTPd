@@ -47,7 +47,7 @@ struct Psockaddr {
     NSString* reqMessage_;
     
     // Response Buffers
-    int resCommand_;
+    int resCode_;
     NSString* resSep_;
     NSString* resMessage_;
     

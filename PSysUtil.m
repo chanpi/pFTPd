@@ -22,6 +22,12 @@
 
 @implementation PSysUtil
 
+- (void) getHomeDocumentDirectory:(NSString**)homeDocumentDirectoryPath {
+    // ホームディレクトリ直下のDocumentsフォルダ
+    NSArray* paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    *homeDocumentDirectoryPath = [[NSString alloc] initWithString:[paths objectAtIndex:0]];
+}
+
 - (void) dupFd2:(CFSocketNativeHandle)oldFd newFd:(CFSocketNativeHandle)newFd {
     int retVal;
     if (oldFd == newFd) {
@@ -57,7 +63,7 @@
 }
 
 
-- (void) getDirectoryAttributes:(NSMutableString**)infoBuffer directoryPath:(NSString*)directoryPath {
+- (void) getDirectoryAttributes:(NSMutableString**)infoBuffer directoryPath:(NSString*)directoryPath {    
     NSFileManager* fileManager = [NSFileManager defaultManager];
     NSMutableArray* files = [[NSMutableArray alloc] initWithArray:[fileManager contentsOfDirectoryAtPath:directoryPath error:nil]];
     
@@ -68,15 +74,20 @@
     
     int count = [files count];
     NSString* filePath;
-    
-    //int digit = 0;  // 10進数の桁数
-    //long tempWidth = 0;
+
     long referenceWidth = 5;
     long fileOwnerWidth = 10;
     long groupOwnerWidth = 10;
     long sizeWidth = 10;
-    
+
     /*
+    int digit = 0;  // 10進数の桁数
+    long tempWidth = 0;
+    long referenceWidth = 0;
+    long fileOwnerWidth = 0;
+    long groupOwnerWidth = 0;
+    long sizeWidth = 0;
+    
     // 各項目の表示幅を決定するために事前にチェック
     for (int i = 0; i < count; i++) {
         filePath = [NSString stringWithFormat:@"%@%@", directoryPath, [files objectAtIndex:i]];
@@ -117,14 +128,9 @@
     NSLog(@"fileOwnerWidth %ld", fileOwnerWidth);
     NSLog(@"groupOwnerWidth %ld", groupOwnerWidth);
     NSLog(@"sizeWidth %ld", sizeWidth);
-    */
+     */
     
     for (int i = 0; i < count; i++) {
-        /*
-        if ([[files objectAtIndex:i] characterAtIndex:0] == '.') {
-            continue;
-        }
-         */
         if ([directoryPath characterAtIndex:[directoryPath length]-1] != '/') {
             filePath = [NSString stringWithFormat:@"%@/%@", directoryPath, [files objectAtIndex:i]];
         } else {
@@ -185,6 +191,7 @@
         // FileName
         [*infoBuffer appendFormat:@"%@\r\n", [files objectAtIndex:i]];
     }
+    [files release];
 }
 
 - (void) getPeerName:(int)fd pSockAddrPtr:(struct Psockaddr*)pSockAddr {
@@ -372,13 +379,17 @@
 
 - (void) convertModifiedDate:(NSString**)buffer date:(NSDate*)date {
     // date: "2010-11-17 09:29:18 +0000"
-    NSString* format = @"MM dd";
-    
+    NSString* format = @"MMM dd";
+    NSLocale* locale = [[NSLocale alloc] initWithLocaleIdentifier:@"en_US"];
     NSDateFormatter* formatter = [[NSDateFormatter alloc] init];
+    [formatter setLocale:locale];
+    
     [formatter setDateFormat:format];
     
     *buffer = [formatter stringFromDate:date];
+    
     [formatter release];
+    [locale release];
 }
 
 - (void) convertModifiedTime:(NSString**)buffer date:(NSDate*)date {

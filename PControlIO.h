@@ -15,8 +15,8 @@
 }
 
 - (int) getRequest:(PSession*)session;
-- (unsigned long) sendResponseNormal:(PSession*)session;
-- (unsigned long) sendResponseHyphen:(PSession*)session;
+- (int) sendResponseNormal:(PSession*)session;
+- (int) sendResponseHyphen:(PSession*)session;
 - (size_t) writeResponseRaw:(PSession*)session;
 
 @end

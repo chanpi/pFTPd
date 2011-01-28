@@ -14,6 +14,8 @@
     
 }
 
+- (void) getHomeDocumentDirectory:(NSString**)homeDocumentDirectoryPath;
+
 - (void) dupFd2:(CFSocketNativeHandle)oldFd newFd:(CFSocketNativeHandle)newFd;
 
 - (unsigned short) sockaddrGetPort:(const struct Psockaddr*)pSockPtr;

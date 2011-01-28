@@ -9,18 +9,18 @@
 #import "PControlIO.h"
 
 @interface PControlIO (Local)
-- (unsigned long) sendResponse:(PSession*)session;
+- (int) sendResponse:(PSession*)session;
+- (NSString*) removeWhiteSpace:(NSString*)string;
 @end
 
 @implementation PControlIO
 
 - (int) getRequest:(PSession*)session {
-    UInt8 buffer[128];
+    UInt8 buffer[512] = {0};
     unsigned long recvLen = 0;
     int bytes;
     size_t size = sizeof(buffer);
     
-    memset(buffer, 0x00, size);
     while (!strchr((char*)buffer, '\n') && recvLen < size) {
         bytes = CFReadStreamRead(session.readStream_, buffer + recvLen, size - recvLen);
         if (bytes < 0) {
@@ -30,6 +30,7 @@
             NSLog(@"[ERROR] CFReadStreamRead() %ld %@", eIndex, eString);
             session.reqCommand_ = [[NSString alloc] initWithString:@"ERROR"];
             session.reqMessage_ = [[NSString alloc] initWithString:(NSString*)eString];
+            CFRelease(eString);
             CFRelease(error);
             
             return -1;
@@ -37,17 +38,20 @@
         recvLen += bytes;
     }
     
-    char tempCommand[16];
-    char tempValue[96];
-    sscanf((const char*)buffer, "%s %s\r\n", tempCommand, tempValue);
+    char tempCommand[16] = {0};
+    char tempValue[512] = {0};
+    char* p = NULL;
+    sscanf((const char*)buffer, "%s ", tempCommand);
+    if ((p = strchr((const char*)buffer, ' ')) != NULL) {
+        strcpy(tempValue, p+1);
+    }
     session.reqCommand_ = [[NSString alloc] initWithUTF8String:tempCommand];
-    session.reqMessage_ = [[NSString alloc] initWithUTF8String:tempValue];
+    session.reqMessage_ = [[NSString alloc] initWithString:[self removeWhiteSpace:[NSString stringWithUTF8String:tempValue]]];
     return 0;
 }
 
 
-- (unsigned long) sendResponse:(PSession*)session {
-    //NSString* temp = [[NSString alloc] initWithFormat:@"%d%@%@\r\n", session.resCode_, session.resSep_, session.resMessage_];
+- (int) sendResponse:(PSession*)session {
     NSString* temp = [NSString stringWithFormat:@"%d%@%@\r\n", session.resCode_, session.resSep_, session.resMessage_];
 	const char* buffer = [temp UTF8String];
     unsigned long sendLen = 0;
@@ -63,8 +67,9 @@
             CFIndex eIndex = CFErrorGetCode(error);
             CFStringRef eString = CFErrorCopyDescription(error);
             NSLog(@"[ERROR] CFWriteStreamWrite() %ld %@", eIndex, eString);
+            CFRelease(eString);
             CFRelease(error);
-            return 0;
+            return bytes;
         }
         sendLen += bytes;
     }
@@ -72,13 +77,13 @@
 }
 
 
-- (unsigned long) sendResponseNormal:(PSession*)session {
+- (int) sendResponseNormal:(PSession*)session {
     session.resSep_ = @" ";
     return [self sendResponse:session];
 }
 
 
-- (unsigned long) sendResponseHyphen:(PSession*)session {
+- (int) sendResponseHyphen:(PSession*)session {
     session.resSep_ = @"-";
     return [self sendResponse:session];    
 }
@@ -104,12 +109,19 @@
             CFIndex eIndex = CFErrorGetCode(error);
             CFStringRef eString = CFErrorCopyDescription(error);
             NSLog(@"[ERROR] CFWriteStreamWrite() %ld %@", eIndex, eString);
+            CFRelease(eString);
             CFRelease(error);
             return 0;
         }
         sendLen += bytes;
     }
     return sendLen;
+}
+
+- (NSString*) removeWhiteSpace:(NSString*)string {
+    NSCharacterSet* charset = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    NSLog(@"%@", [string stringByTrimmingCharactersInSet:charset]);
+    return [string stringByTrimmingCharactersInSet:charset];
 }
 
 @end

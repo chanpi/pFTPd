@@ -183,6 +183,9 @@
             } else if ([session.reqCommand_ isEqualToString:@"STOR"]) {
                 [postLogin handleSTOR:session];
                 
+            } else if ([session.reqCommand_ isEqualToString:@"DELE"]) {
+                [postLogin handleDELE:session];
+
             } else if ([session.reqCommand_ isEqualToString:@"QUIT"]) {
                 [postLogin handleQUIT:session];
                 

@@ -36,6 +36,7 @@
 - (void) handleRETR:(PSession*)session;
 
 - (void) handleSTOR:(PSession*)session;
+- (void) handleDELE:(PSession*)session;
 
 - (void) handleQUIT:(PSession*)session;
 - (void) handleHELP:(PSession*)session;

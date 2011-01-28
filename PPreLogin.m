@@ -8,6 +8,9 @@
 
 #import "PPreLogin.h"
 #import "PCodes.h"
+#import "PSysUtil.h"
+
+#include <unistd.h>
 
 @implementation PPreLogin
 
@@ -30,9 +33,22 @@
 }
 
 - (BOOL) handlePASS:(PSession*)session {
+    PSysUtil* sysUtil = [[PSysUtil alloc] init];
+    NSString* homeDocumentDirectory;
+    
     session.resCode_ = FTP_LOGINOK;
     session.resMessage_ = @"Login successful.";
     [ctrlIO_ sendResponseNormal:session];
+    
+    [sysUtil getHomeDocumentDirectory:&homeDocumentDirectory];
+    if(chdir([homeDocumentDirectory UTF8String]) != 0) {
+        NSLog(@"chdir失敗");
+    } else {
+        NSLog(@"chdir %@", NSHomeDirectory());
+    }
+    
+    [homeDocumentDirectory release];
+    [sysUtil release];
     return YES;
 }
 

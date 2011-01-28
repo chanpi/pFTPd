@@ -81,7 +81,7 @@ static void AcceptCallback(CFSocketRef socket, CFSocketCallBackType type, CFData
     CFRunLoopAddSource(CFRunLoopGetCurrent(), sourceRef, kCFRunLoopCommonModes);
 	CFRelease(sourceRef);
 	
-	CFRunLoopRun();
+	//CFRunLoopRun();
 	
     return TRUE;
 }

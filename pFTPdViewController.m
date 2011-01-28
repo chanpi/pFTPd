@@ -71,10 +71,12 @@
     if ([ftpMain_ ftpdStart:controlPort remote:0]) {
         NSLog(@"started");
     }
+    startButton_.enabled = NO;
 }
 
 - (IBAction) pressedStop:(id)sender {
     [ftpMain_ stopListening];
+    startButton_.enabled = YES;
 }
 
 @end

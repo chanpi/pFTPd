@@ -16,6 +16,8 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 @interface PPostLogin (Local)
 - (void) portCleanup:(PSession*)session;
@@ -226,7 +228,7 @@
         session.isPasv_ = YES;
         
         session.resCode_ = FTP_PASVOK;
-        session.resMessage_ = [NSString stringWithFormat:@"Entering Passive Mode. %@,%d,%d",
+        session.resMessage_ = [NSString stringWithFormat:@"Entering Passive Mode (%@,%d,%d).",
                                [NSString stringWithUTF8String:localAddress], 0xff & pasvPort>>8, 0xff & pasvPort];
         [ctrlIO_ sendResponseNormal:session];
         return;
@@ -279,26 +281,32 @@
 }
 
 - (void) handleDirCommon:(PSession *)session fullDetailes:(BOOL)fullDetailes statCommand:(BOOL)statCommand {
+    PSysUtil* sysUtil = [[PSysUtil alloc] init];
+    NSString* homeDocumentDirectory = nil;
+
+    int error;
+    BOOL isSendDataCompleted = NO;
     socklen_t sockLength = 0;
     NSString* dirPath = session.reqMessage_;
+    
     if (dirPath == nil || [dirPath length] == 0) {
         char currentDirectory[32];
         if (getcwd(currentDirectory, sizeof(currentDirectory)) != NULL) {
             dirPath = [NSString stringWithUTF8String:currentDirectory];
         } else {
-            session.resCode_ = FTP_BADSENDFILE;
-            session.resMessage_ = @"Failed to get current directory.";
-            [ctrlIO_ sendResponseNormal:session];
-            return;
+            [sysUtil getHomeDocumentDirectory:&homeDocumentDirectory];
+            dirPath = homeDocumentDirectory;
         }
     }
     
     NSLog(@"currentDir = %@[%d]", dirPath, [dirPath length]);
     
     NSMutableString* directory = [[NSMutableString alloc] init];
-    PSysUtil* sysUtil = [[PSysUtil alloc] init];
     [sysUtil getDirectoryAttributes:&directory directoryPath:dirPath];
-    NSLog(@"%@", directory);
+    if (homeDocumentDirectory != nil) {
+        [homeDocumentDirectory release];
+        homeDocumentDirectory = nil;
+    }
     [sysUtil release];
     
     // データ接続をオープンしようとすることを知らせる
@@ -306,20 +314,62 @@
     session.resMessage_ = @"Here comes the directory listing.";
     [ctrlIO_ sendResponseNormal:session];
     
-    if (session.pPortSockAddress_ == NULL) {
-        session.pPortSockAddress_ = (struct Psockaddr*)malloc(sizeof(struct Psockaddr));
+    @try {
+        if (session.isPasv_) {
+            if (session.pPortSockAddress_ == NULL) {
+                session.pPortSockAddress_ = (struct Psockaddr*)malloc(sizeof(struct Psockaddr));
+            }
+            sockLength = sizeof(struct sockaddr);
+            session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)session.pPortSockAddress_, &sockLength);
+            NSLog(@"accepted!!!!");
+        } else {
+            session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (session.dataFd_ < 0) {
+                NSLog(@"[ERROR] Failed to create data socket.");
+                session.resCode_ = FTP_FILEFAIL;
+                session.resMessage_ = @"Failed to create data socket.";
+                
+                NSException* ex = [NSException exceptionWithName:@"PException" reason:@"socket() : Failed to create data socket." userInfo:nil];
+                @throw ex;
+            }
+            
+            error = connect(session.dataFd_, (struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in));  // PORTコマンドでアドレス設定済み
+            if (error < 0) {
+                NSLog(@"[ERROR] Failed to connect to remote host.");
+                session.resCode_ = FTP_FILEFAIL;    // TODO!!!
+                session.resMessage_ = @"Failed to connect to remote host.";
+                
+                NSException* ex = [NSException exceptionWithName:@"PException" reason:@"connect() : Failed to connect to remote host." userInfo:nil];
+                @throw ex;
+            }
+            
+        }
+        if ([dataIO_ sendData:session data:[directory UTF8String] dataSize:[directory length]] > 0) {
+            isSendDataCompleted = YES;
+        }
     }
-    sockLength = sizeof(struct sockaddr);
-    session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)session.pPortSockAddress_, &sockLength);
-    NSLog(@"accepted!!!!");
+    @catch (NSException *exception) {
+        NSLog(@"[ERROR] %@ communicate: %@: %@", NSStringFromClass([self class]), [exception name], [exception reason]);
+        session.resCode_ = FTP_BADSENDFILE;
+        session.resMessage_ = [exception reason];
+    }
     
-    [dataIO_ sendData:session data:[directory UTF8String] dataSize:[directory length]];
-    session.resCode_ = FTP_TRANSFEROK;
-    session.resMessage_ = @"Directory send OK.";
+    if (isSendDataCompleted) {
+        session.resCode_ = FTP_TRANSFEROK;
+        session.resMessage_ = @"Directory send OK.";
+    } else {
+        session.resCode_ = FTP_BADSENDFILE;
+        session.resMessage_ = @"Failed to list up files.";
+    }
+    
     [ctrlIO_ sendResponseNormal:session];
     
-    close(session.dataFd_);
-    close(session.pasvListenFd_);
+    if (session.dataFd_ > 0) {
+        close(session.dataFd_);
+    }
+    if (session.pasvListenFd_ > 0) {
+        close(session.pasvListenFd_);
+    }
     session.dataFd_ = session.pasvListenFd_ = -1;
     
     [directory release];
@@ -462,8 +512,7 @@
             struct sockaddr_in address;
             socklen_t sockLen = sizeof(address);
 
-            session.dataFd_ = accept(session.pasvListenFd_, (struct sockeaddr*)&address, &sockLen);
-            [dataIO_ sendFile:session fileHandle:fileHandle fileSize:fileSize];
+            session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)&address, &sockLen);
             
         } else {
             session.dataFd_ = 0;
@@ -486,9 +535,8 @@
                 NSException* ex = [NSException exceptionWithName:@"PException" reason:@"connect() : Failed to connect to remote host." userInfo:nil];
                 @throw ex;
             }
-            
-            [dataIO_ sendFile:session fileHandle:fileHandle fileSize:fileSize];
         }
+        [dataIO_ sendFile:session fileHandle:fileHandle fileSize:fileSize];
         
     }
     @catch (NSException *exception) {
@@ -517,35 +565,49 @@
     BOOL ret;
     NSFileHandle* fileHandle;
     
-    session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (session.dataFd_ < 0) {
-        NSLog(@"[ERROR] Failed to create socket() in handleSTOR.");
-        session.resCode_ = FTP_BADSENDCONN;
-        session.resMessage_ = @"Failed to create data socket.";
-        [ctrlIO_ sendResponseNormal:session];
-        return;
-    }
+    // データコネクション
+    if (session.isPasv_) {
+        struct sockaddr_in address;
+        socklen_t sockLen = sizeof(address);
+        session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)&address, &sockLen);
+        NSLog(@"accepted!!");
 
-    if (connect(session.dataFd_, (const struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in)) < 0) {
-        NSLog(@"[ERROR] Can't open data connection.");
-        session.resCode_ = FTP_BADSENDCONN;
-        session.resMessage_ = @"Can't open data connection.";
-        [ctrlIO_ sendResponseNormal:session];
-        close(session.dataFd_);
-        return;
-    }
+    } else {
+        session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (session.dataFd_ < 0) {
+            NSLog(@"[ERROR] Failed to create socket() in handleSTOR.");
+            session.resCode_ = FTP_BADSENDCONN;
+            session.resMessage_ = @"Failed to create data socket.";
+            [ctrlIO_ sendResponseNormal:session];
+            return;
+        }
         
+        if (connect(session.dataFd_, (const struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in)) < 0) {
+            NSLog(@"[ERROR] Can't open data connection.");
+            session.resCode_ = FTP_BADSENDCONN;
+            session.resMessage_ = @"Can't open data connection.";
+            [ctrlIO_ sendResponseNormal:session];
+            close(session.dataFd_);
+            return;
+        }
+    }
+      
     session.resCode_ = FTP_DATACONN;
     session.resMessage_ = @"Here comes the directory listing.";
     [ctrlIO_ sendResponseNormal:session];
     
-    ret = [[NSFileManager defaultManager] createFileAtPath:session.reqMessage_ contents:nil attributes:nil];
+    // ファイルを作成
+    const char* encodedFileName = [session.reqMessage_ cStringUsingEncoding:NSUTF8StringEncoding];
+    NSString* utf8FileName = [NSString stringWithCString:encodedFileName encoding:NSUTF8StringEncoding];
+    ret = [[NSFileManager defaultManager] createFileAtPath:utf8FileName contents:nil attributes:nil];
+    
     if (!ret) {
         NSLog(@"[ERROR] Failed to create file.");
         session.resCode_ = FTP_UPLOADFAIL;
         session.resMessage_ = @"Failed to create file.";
         
     } else {
+        // ファイルに書き込み
         fileHandle = [NSFileHandle fileHandleForWritingAtPath:session.reqMessage_];
         if (!fileHandle) {
             NSLog(@"[ERROR] Failed to open %@.", session.reqMessage_);
@@ -553,7 +615,7 @@
             session.resMessage_ = @"Failed to open file";
             
         } else {
-            if (![dataIO_ recvFile:session fileHandle:fileHandle]) {
+            if ([dataIO_ recvFile:session fileHandle:fileHandle] < 0) {
                 NSLog(@"[ERROR] Failed to write file.");
                 session.resCode_ = FTP_BADSENDFILE;
                 session.resMessage_ = @"Failed to write file.";
@@ -564,6 +626,28 @@
     
     [ctrlIO_ sendResponseNormal:session];
     close(session.dataFd_);
+    session.dataFd_ = -1;
+    if (session.pasvListenFd_ > 0) {
+        close(session.pasvListenFd_);
+        session.pasvListenFd_ = -1;
+    }
+}
+
+- (void) handleDELE:(PSession*)session {
+    const char* encodedFileName = [session.reqMessage_ cStringUsingEncoding:NSUTF8StringEncoding];
+    BOOL ret = [[NSFileManager defaultManager]
+                removeItemAtPath:[NSString stringWithCString:encodedFileName encoding:NSUTF8StringEncoding] error:nil];
+    
+    if (!ret) {
+        session.resCode_ = FTP_FILEFAIL;
+        session.resMessage_ = @"Failed to delete file.";
+        NSLog(@"[ERROR] Failed to delete file.");
+    } else {
+        session.resCode_ = FTP_DELEOK;
+        session.resMessage_ = @"Delete file successful.";
+        NSLog(@"Delete successful");
+    }
+    [ctrlIO_ sendResponseNormal:session];
 }
 
 - (void) handleHELP:(PSession*)session {

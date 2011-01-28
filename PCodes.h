@@ -28,6 +28,7 @@
 #define FTP_LOGINOK         230
 #define FTP_CWDOK           250
 #define FTP_RMDIROK         250
+#define FTP_DELEOK          250
 #define FTP_PWDOK           257
 #define FTP_MKDIROK         257
 
