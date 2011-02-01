@@ -22,7 +22,14 @@
     size_t size = sizeof(buffer);
     
     while (!strchr((char*)buffer, '\n') && recvLen < size) {
-        bytes = CFReadStreamRead(session.readStream_, buffer + recvLen, size - recvLen);
+		/*
+		bytes = recv(session.controlFd_, buffer + recvLen, size - recvLen, 0);
+		if (bytes < 0) {
+			NSLog(@"[ERROR] recv!!!!!");
+			return -1;
+		}
+		 */
+		bytes = CFReadStreamRead(session.readStream_, buffer + recvLen, size - recvLen);
         if (bytes < 0) {
             CFErrorRef error = CFReadStreamCopyError(session.readStream_);
             CFIndex eIndex = CFErrorGetCode(error);
@@ -41,15 +48,27 @@
     char tempCommand[16] = {0};
     char tempValue[512] = {0};
     char* p = NULL;
+	
+	
+	
+	fprintf(stderr, ">>> %s[%ld bytes]\n", (char*)buffer, recvLen);
     sscanf((const char*)buffer, "%s ", tempCommand);
+    if (strlen(tempCommand) == 0) {
+        return -2;
+    }
+    
     if ((p = strchr((const char*)buffer, ' ')) != NULL) {
         strcpy(tempValue, p+1);
     }
     session.reqCommand_ = [[NSString alloc] initWithUTF8String:tempCommand];
-    session.reqMessage_ = [[NSString alloc] initWithString:[self removeWhiteSpace:[NSString stringWithUTF8String:tempValue]]];
+	if (strlen(tempValue) != 0) {
+		session.reqMessage_ = [[NSString alloc] initWithString:[self removeWhiteSpace:[NSString stringWithUTF8String:tempValue]]];
+	} else {
+		session.reqMessage_ = [[NSString alloc] initWithString:@""];
+	}
+
     return 0;
 }
-
 
 - (int) sendResponse:(PSession*)session {
     NSString* temp = [NSString stringWithFormat:@"%d%@%@\r\n", session.resCode_, session.resSep_, session.resMessage_];
@@ -62,7 +81,6 @@
     while (sendLen < count) {
         bytes = CFWriteStreamWrite(session.writeStream_, (UInt8*)buffer + sendLen, count - sendLen);
         if (bytes < 0) {
-            // TODO!!!!!
             CFErrorRef error = CFWriteStreamCopyError(session.writeStream_);
             CFIndex eIndex = CFErrorGetCode(error);
             CFStringRef eString = CFErrorCopyDescription(error);

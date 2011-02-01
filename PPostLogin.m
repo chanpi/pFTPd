@@ -12,6 +12,7 @@
 #import "PControlIO.h"
 #import "PPrivilegeSocket.h"
 #import "PSession.h"
+#import "PDefs.h"
 
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -93,8 +94,8 @@
     session.resMessage_ = @" REST STREAM\r\n";
     [ctrlIO_ writeResponseRaw:session];
      */
-    session.resMessage_ = @" SIZE\r\n";
-    [ctrlIO_ writeResponseRaw:session];
+//    session.resMessage_ = @" SIZE\r\n";
+//    [ctrlIO_ writeResponseRaw:session];
     /*
     session.resMessage_ = @" TVFS\r\n";
     [ctrlIO_ writeResponseRaw:session];
@@ -108,15 +109,15 @@
 }
 
 - (void) handlePWD:(PSession*)session {
-    char path[256];
+    char path[PATH_MAX] = {0};
     char* pwd = getcwd(path, sizeof(path));
     if (pwd != NULL) {
+        session.resCode_ = FTP_PWDOK;
         session.resMessage_ = [NSString stringWithFormat:@"\"%@\"", [NSString stringWithUTF8String:path]];
     } else {
-        NSLog(@"getcwd = NULL!!!");
-        session.resMessage_ = @"\"/\"";
+        session.resCode_ = FTP_FILEFAIL;
+        session.resMessage_ = @"Failed to get current directory.";
     }
-    session.resCode_ = FTP_PWDOK;
     [ctrlIO_ sendResponseNormal:session];
 }
 
@@ -125,7 +126,7 @@
         session.resCode_ = FTP_CWDOK;
         session.resMessage_ = @"Directory successfully changed.";
     } else {
-        NSLog(@"[ERROR] chdir");
+        NSLog(@"[ERROR] chdir [errno: %d]", errno);
         session.resCode_ = FTP_FILEFAIL;
         session.resMessage_ = @"Failed to change directory.";
     }
@@ -139,24 +140,35 @@
 }
 
 - (void) handleMKD:(PSession*)session {
-    mode_t mode = S_IRUSR | S_IWUSR | S_IXUSR |
-                    S_IRGRP | S_IWGRP | S_IXGRP |
-                    S_IROTH | S_IWOTH | S_IXOTH;
-    if (mkdir([session.reqMessage_ UTF8String], mode) == 0) {
+    NSFileManager* fileManager = [NSFileManager defaultManager];
+    
+    // ファイル名のチェック
+    if ([fileManager fileExistsAtPath:session.reqMessage_]) {
+        session.resCode_ = FTP_FILEFAIL;
+        session.resMessage_ = @"File exist at path.";
+        [ctrlIO_ sendResponseNormal:session];
+        return;
+    }
+    
+    NSError* error = nil;
+    if ([fileManager createDirectoryAtPath:session.reqMessage_ withIntermediateDirectories:YES attributes:nil error:&error]) {
         session.resCode_ = FTP_MKDIROK;
         session.resMessage_ = [NSString stringWithFormat:@"\"%@\" created.", session.reqMessage_];
     } else {
         session.resCode_ = FTP_FILEFAIL;
-        session.resMessage_ = @"Create directory operation failed.";
-    }
+        session.resMessage_ = [error localizedDescription];
+    }    
     [ctrlIO_ sendResponseNormal:session];
 }
 
 - (void) handleRMD:(PSession*)session {
-    if (rmdir([session.reqMessage_ UTF8String]) == 0) {
+    NSFileManager* fileManeger = [NSFileManager defaultManager];
+    NSError* error = nil;
+    if ([fileManeger removeItemAtPath:session.reqMessage_ error:&error]) {
         session.resCode_ = FTP_RMDIROK;
         session.resMessage_ = @"Remove directory operation successful.";
     } else {
+        NSLog(@"[ERROR] handleRMD: %@", [error localizedDescription]);
         session.resCode_ = FTP_FILEFAIL;
         session.resMessage_ = @"Remove directory operation failed.";
     }
@@ -213,7 +225,7 @@
         [ctrlIO_ sendResponseNormal:session];
         return;
     } else {
-        char localAddress[20] = {0};
+        char localAddress[P_IPADDRESS_LENGTH] = {0};
         char* p = localAddress;
         struct in_addr inAddr;
         inAddr = session.pLocalAddress_->u.u_sockaddr_in.sin_addr;
@@ -257,6 +269,15 @@
     [ctrlIO_ sendResponseNormal:session];
 }
 
+- (void) handleSTAT:(PSession*)session {
+    if (session.reqMessage_ == nil) {
+        // stat情報を表示
+        
+        return;
+    }
+    //[self handleDirCommon:session fullDetailes:YES statCommand:YES];
+}
+
 - (void) handleLIST:(PSession*)session {
     BOOL fullDetails = YES;
     if (session.reqMessage_ != nil && [session.reqMessage_ length] > 1 && [session.reqMessage_ characterAtIndex:0] == '-') {
@@ -290,12 +311,16 @@
     NSString* dirPath = session.reqMessage_;
     
     if (dirPath == nil || [dirPath length] == 0) {
-        char currentDirectory[32];
-        if (getcwd(currentDirectory, sizeof(currentDirectory)) != NULL) {
+        char currentDirectory[PATH_MAX] = {0};
+        char* pwd = getcwd(currentDirectory, sizeof(currentDirectory));
+        if (pwd != NULL) {
             dirPath = [NSString stringWithUTF8String:currentDirectory];
         } else {
-            [sysUtil getHomeDocumentDirectory:&homeDocumentDirectory];
-            dirPath = homeDocumentDirectory;
+            session.resCode_ = FTP_BADSENDFILE;
+            session.resMessage_ = @"Failed to get current directory.";
+            [ctrlIO_ sendResponseNormal:session];
+            [sysUtil release];
+            return;
         }
     }
     
@@ -303,6 +328,7 @@
     
     NSMutableString* directory = [[NSMutableString alloc] init];
     [sysUtil getDirectoryAttributes:&directory directoryPath:dirPath];
+    NSLog(@">>>\n%@", directory);
     if (homeDocumentDirectory != nil) {
         [homeDocumentDirectory release];
         homeDocumentDirectory = nil;
@@ -344,7 +370,7 @@
             }
             
         }
-        if ([dataIO_ sendData:session data:[directory UTF8String] dataSize:[directory length]] > 0) {
+        if ([dataIO_ sendData:session data:[directory UTF8String] dataSize:strlen([directory UTF8String])] > 0) {
             isSendDataCompleted = YES;
         }
     }
@@ -381,13 +407,28 @@
     NSDictionary* attributes;
     NSString* filePath;
     
-    char path[256];
+    char path[PATH_MAX] = {0};
     char* pwd = getcwd(path, sizeof(path));
     if (pwd == NULL) {
         session.resCode_ = FTP_FILEFAIL;
         session.resMessage_ = @"Could not get file size.";
     } else {
-        filePath = [NSString stringWithFormat:@"%@%@", [NSString stringWithUTF8String:path], session.reqMessage_];
+        NSString* tempFormat;
+        if (path[strlen(path)-1] != '/') {
+            if ([session.reqMessage_ characterAtIndex:0] != '/') {
+                tempFormat = @"%@/%@";
+            } else {
+                tempFormat = @"%@%@";
+            }
+        } else {
+            if ([session.reqMessage_ characterAtIndex:0] != '/') {
+                tempFormat = @"%@%@";
+            } else {
+                tempFormat = @"%@%@";
+                path[strlen(path)-1] = '\0';
+            }
+        }
+        filePath = [NSString stringWithFormat:tempFormat, [NSString stringWithUTF8String:path], session.reqMessage_];
         NSLog(@"File Path : %@", filePath);
         
         // ファイル情報
@@ -453,6 +494,10 @@
     session.resCode_ = FTP_PORTOK;
     session.resMessage_ = @"PORT command successful. Consider using PASV.";
     [ctrlIO_ sendResponseNormal:session];
+}
+
+- (void) handleABOR:(PSession*)session {
+    
 }
 
 
@@ -615,11 +660,7 @@
             session.resMessage_ = @"Failed to open file";
             
         } else {
-            if ([dataIO_ recvFile:session fileHandle:fileHandle] < 0) {
-                NSLog(@"[ERROR] Failed to write file.");
-                session.resCode_ = FTP_BADSENDFILE;
-                session.resMessage_ = @"Failed to write file.";
-            }
+            [dataIO_ recvFile:session fileHandle:fileHandle];
             [fileHandle closeFile];
         }
     }
@@ -631,6 +672,76 @@
         close(session.pasvListenFd_);
         session.pasvListenFd_ = -1;
     }
+}
+
+- (void) handleAPPE:(PSession*)session {
+    struct sockaddr_in address;
+    socklen_t sockLen = sizeof(address);
+    
+    NSFileManager* fileManager = [NSFileManager defaultManager];
+    if (![fileManager fileExistsAtPath:session.reqMessage_]) {
+        [self handleSTOR:session];
+        return;
+    }
+    
+    if (session.isPasv_) {
+        session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)&address, &sockLen);
+    } else {
+        session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (session.dataFd_ < 0) {
+            NSLog(@"[ERROR] Failed to create socket() in handleSTOR.");
+            session.resCode_ = FTP_BADSENDCONN;
+            session.resMessage_ = @"Failed to create data socket.";
+            [ctrlIO_ sendResponseNormal:session];
+            return;
+        }
+        
+        if (connect(session.dataFd_, (const struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in)) < 0) {
+            NSLog(@"[ERROR] Can't open data connection.");
+            session.resCode_ = FTP_BADSENDCONN;
+            session.resMessage_ = @"Can't open data connection.";
+            [ctrlIO_ sendResponseNormal:session];
+            close(session.dataFd_);
+            return;
+        }
+    }
+    
+    session.resCode_ = FTP_DATACONN;
+    session.resMessage_ = @"Here comes the directory listing.";
+    [ctrlIO_ sendResponseNormal:session];
+    
+    // ファイルオープンし、追記できるようファイルポジションを進める
+    NSFileHandle* fileHandle = [NSFileHandle fileHandleForWritingAtPath:session.reqMessage_];
+    if (fileHandle == nil) {
+        NSLog(@"[ERROR] fileHandleForWritingAtPath: handleAPPE");
+        
+    }
+    
+    if (!fileHandle) {
+        NSLog(@"[ERROR] Failed to open %@.", session.reqMessage_);
+        session.resCode_ = FTP_BADSENDFILE;
+        session.resMessage_ = @"Failed to open file";
+        
+    } else {
+        // EOFへポインタを進める
+        [fileHandle seekToEndOfFile];
+        
+        if ([dataIO_ recvFile:session fileHandle:fileHandle] < 0) {
+            NSLog(@"[ERROR] Failed to write file.");
+            session.resCode_ = FTP_BADSENDFILE;
+            session.resMessage_ = @"Failed to write file.";
+        }
+        [fileHandle closeFile];
+    }
+    
+    [ctrlIO_ sendResponseNormal:session];
+    close(session.dataFd_);
+    session.dataFd_ = -1;
+    if (session.pasvListenFd_ > 0) {
+        close(session.pasvListenFd_);
+        session.pasvListenFd_ = -1;
+    }
+
 }
 
 - (void) handleDELE:(PSession*)session {
@@ -667,6 +778,16 @@
     session.resCode_ = FTP_HELP;
     session.resMessage_ = @"Help OK.";
     [ctrlIO_ sendResponseHyphen:session];    
+}
+
+- (void) handleREST:(PSession*)session {
+    session.restartPos_ = [session.reqMessage_ intValue];
+    if (session.restartPos_ < 0) {
+        session.restartPos_ = 0;
+    }
+    session.resCode_ = FTP_RESTOK;
+    session.resMessage_ = [NSString stringWithFormat:@"Restart position accepted (%d)", session.restartPos_];
+    [ctrlIO_ sendResponseNormal:session];
 }
 
 - (void) handleQUIT:(PSession*)session {

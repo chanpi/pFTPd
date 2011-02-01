@@ -72,7 +72,7 @@
         [files insertObject:@".." atIndex:1];
     }
     
-    int count = [files count];
+    int fileCount = [files count];
     NSString* filePath;
 
     long referenceWidth = 5;
@@ -89,7 +89,7 @@
     long sizeWidth = 0;
     
     // 各項目の表示幅を決定するために事前にチェック
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < fileCount; i++) {
         filePath = [NSString stringWithFormat:@"%@%@", directoryPath, [files objectAtIndex:i]];
         NSLog(@"filePath = %@", filePath);
         NSDictionary* attributes = [fileManager attributesOfItemAtPath:filePath error:nil];
@@ -128,9 +128,9 @@
     NSLog(@"fileOwnerWidth %ld", fileOwnerWidth);
     NSLog(@"groupOwnerWidth %ld", groupOwnerWidth);
     NSLog(@"sizeWidth %ld", sizeWidth);
-     */
+    */
     
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < fileCount; i++) {
         if ([directoryPath characterAtIndex:[directoryPath length]-1] != '/') {
             filePath = [NSString stringWithFormat:@"%@/%@", directoryPath, [files objectAtIndex:i]];
         } else {
@@ -189,7 +189,10 @@
         [*infoBuffer appendFormat:@"%@ ", temp];
         
         // FileName
-        [*infoBuffer appendFormat:@"%@\r\n", [files objectAtIndex:i]];
+        char tempFileName[PATH_MAX] = {0};
+        strcpy(tempFileName, [[files objectAtIndex:i] UTF8String]);
+        [*infoBuffer appendFormat:@"%@\r\n", [NSString stringWithCString:tempFileName encoding:NSUTF8StringEncoding]];
+//        [*infoBuffer appendFormat:@"%@\r\n", [files objectAtIndex:i]];
     }
     [files release];
 }

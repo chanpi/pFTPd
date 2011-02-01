@@ -23,6 +23,7 @@
 
 @synthesize isAnonymous_;
 
+@synthesize restartPos_;
 @synthesize isAscii_;
 @synthesize isEpsvAll_;
 @synthesize isPasv_;
@@ -55,6 +56,7 @@
 
     isAnonymous_ = YES;
     
+    restartPos_ = 0;
     isAscii_ = NO;
     isEpsvAll_ = NO;
     isPasv_ = NO;

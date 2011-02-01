@@ -76,7 +76,6 @@
     [sysUtil release];
 }
 
-
 - (void) communicate:(id)param {
     NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     
@@ -116,6 +115,8 @@
                 [session.reqCommand_ release];
                 [session.reqMessage_ release];
                 break;
+            } else if (ret == -2) {
+                continue;
             }
             
             NSLog(@"[req] %@ %@", session.reqCommand_, session.reqMessage_);
@@ -124,9 +125,7 @@
             if ([session.reqCommand_ isEqualToString:@"USER"]) {
                 [preLogin handleUSER:session];
                 
-            } else if ([session.reqCommand_ isEqualToString:@"PASS"]) {
-				//[preLogin handlePASS:session];
-				
+            } else if ([session.reqCommand_ isEqualToString:@"PASS"]) {				
                 if ([preLogin handlePASS:session]) {
                     [preLogin release];
                     preLogin = nil;
@@ -164,6 +163,9 @@
             } else if ([session.reqCommand_ isEqualToString:@"TYPE"]) {
                 [postLogin handleTYPE:session];
                 
+//            } else if ([session.reqCommand_ isEqualToString:@"STAT"]) {
+//                [postLogin handleSTAT:session];
+                
             } else if ([session.reqCommand_ isEqualToString:@"LIST"]) {
                 [postLogin handleLIST:session];
                 
@@ -171,8 +173,8 @@
                        [session.reqCommand_ isEqualToString:@"NLST"]) {
                 [postLogin handleNLIST:session];
                 
-            } else if ([session.reqCommand_ isEqualToString:@"SIZE"]) {
-                [postLogin handleSIZE:session];            
+//            } else if ([session.reqCommand_ isEqualToString:@"SIZE"]) {
+//                [postLogin handleSIZE:session];            
                 
             } else if ([session.reqCommand_ isEqualToString:@"PORT"]) {
                 [postLogin handlePORT:session];
@@ -183,9 +185,18 @@
             } else if ([session.reqCommand_ isEqualToString:@"STOR"]) {
                 [postLogin handleSTOR:session];
                 
+            } else if ([session.reqCommand_ isEqualToString:@"APPE"]) {
+                [postLogin handleAPPE:session];
+                
             } else if ([session.reqCommand_ isEqualToString:@"DELE"]) {
                 [postLogin handleDELE:session];
+                
+            } else if ([session.reqCommand_ isEqualToString:@"REST"]) {
+                [postLogin handleREST:session];                
 
+//            } else if ([session.reqCommand_ isEqualToString:@"MDTM"]) {
+//                [postLogin handleMDTM:session];                
+                
             } else if ([session.reqCommand_ isEqualToString:@"QUIT"]) {
                 [postLogin handleQUIT:session];
                 
@@ -212,13 +223,26 @@
     }
 	@finally {
 		close(session.controlFd_);
+		session.controlFd_ = -1;
+		
+		if (session.dataFd_ != -1) {
+			close(session.dataFd_);
+			session.dataFd_ = -1;
+		}
+		
+		if (session.pasvListenFd_ != -1) {
+			close(session.pasvListenFd_);
+			session.pasvListenFd_ = -1;
+		}
 		
 		if (session.readStream_ != NULL) {
 			CFReadStreamClose(session.readStream_);
+			CFRelease(session.readStream_);
 			session.readStream_ = NULL;
 		}
 		if (session.writeStream_ != NULL) {
 			CFWriteStreamClose(session.writeStream_);
+			CFRelease(session.writeStream_);
 			session.writeStream_ = NULL;
 		}
 		

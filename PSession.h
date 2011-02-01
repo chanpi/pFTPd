@@ -38,6 +38,7 @@ struct Psockaddr {
     BOOL isAnonymous_;
     
     // Details of th FTP protocol state
+    int restartPos_;
     BOOL isAscii_;
     BOOL isEpsvAll_;
     BOOL isPasv_;
@@ -73,6 +74,7 @@ struct Psockaddr {
 
 @property (assign) BOOL isAnonymous_;
 
+@property (assign) int restartPos_;
 @property (assign) BOOL isAscii_;
 @property (assign) BOOL isEpsvAll_;
 @property (assign) BOOL isPasv_;

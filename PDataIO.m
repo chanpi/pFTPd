@@ -12,6 +12,7 @@
 #import "PSysUtil.h"
 #import "PCommunicator.h"
 #import "PPrivilegeSocket.h"
+#import "PDefs.h"
 
 @interface PDataIO (Local)
 - (void) initDataSockParams:(PSession*)session socketFd:(int)socketFd;
@@ -104,8 +105,8 @@
 //    [priv release];
 }
 
-- (int) sendData:(PSession*)session data:(const void*)data dataSize:(unsigned long)dataSize {
-    unsigned long sendLen = 0;
+- (unsigned long long) sendData:(PSession*)session data:(const void*)data dataSize:(unsigned long long)dataSize {
+    unsigned long long sendLen = 0;
     int bytes = 0;
     
     if (session.dataFd_ == -1) {
@@ -113,8 +114,15 @@
         return 0;
     }
     while (sendLen < dataSize) {
-        bytes = send(session.dataFd_, data + sendLen, dataSize - sendLen, 0);
+        bytes = send(session.dataFd_, data + sendLen, dataSize - sendLen, SO_NOSIGPIPE);
         if (bytes < 0) {
+            if (errno == EPIPE) {
+                NSLog(@"[ERROR] SIGPIPE!!!");
+                session.resCode_ = FTP_BADSENDFILE;
+                session.resMessage_ = @"Connection is closed.";
+                return 0;
+            }
+            
             NSLog(@"[ERROR] sendData()");
             session.resCode_ = FTP_BADSENDFILE;
             session.resMessage_ = @"Requested action aborted. Local error in processing : send";
@@ -125,51 +133,88 @@
     return sendLen;
 }
 
-- (int) sendFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle fileSize:(unsigned long)fileSize {
-    unsigned long sendLen = 0;
+- (unsigned long long) sendFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle fileSize:(unsigned long long)fileSize {
+    unsigned long long sendLen = 0, totalSendLen = 0;
+    unsigned long long leftFileSize;
     int bytes = 0;
-    NSData* sendData = [fileHandle readDataToEndOfFile];
-    fprintf(stderr, "[%ld bytes] %s\n", fileSize, (char*)[sendData bytes]);
-    
-    while (sendLen < fileSize) {
-        bytes = send(session.dataFd_, [sendData bytes] + sendLen, fileSize - sendLen, 0);
-        if (bytes < 0) {
-            // TODO!!!!!
-            NSLog(@"[ERROR] sendFile:fileHandle:fileSize;");
-            session.resCode_ = FTP_BADSENDFILE;
-            session.resMessage_ = @"[ERROR] sendFile()";
-            return bytes;
+    NSData* sendData;
+        
+    while (totalSendLen < fileSize) {
+        
+        if (fileSize - totalSendLen > P_READ_FILE_SIZE) {
+            leftFileSize = P_READ_FILE_SIZE;
+        } else {
+            leftFileSize = fileSize - totalSendLen;
         }
-        sendLen += bytes;
+        
+		sendData = [fileHandle readDataOfLength:leftFileSize];
+        [fileHandle seekToFileOffset:leftFileSize];
+        
+        while (sendLen < leftFileSize) {
+            bytes = send(session.dataFd_, [sendData bytes] + sendLen, leftFileSize - sendLen, SO_NOSIGPIPE);
+            if (bytes < 0) {
+                if (errno == EPIPE) {
+                    NSLog(@"[ERROR] SIGPIPE!!");
+                    session.resCode_ = FTP_BADSENDFILE;
+                    session.resMessage_ = @"Connection is closed.";
+                    return 0;
+                }
+                NSLog(@"[ERROR] sendFile:fileHandle:fileSize;");
+                session.resCode_ = FTP_BADSENDFILE;
+                session.resMessage_ = @"Failed to transfer file.";
+                return bytes;
+            }
+            sendLen += bytes;
+        }
+        
+        totalSendLen += sendLen;
+        sendLen = 0;
     }
-    NSLog(@"send %ld bytes", sendLen);
+    
+    NSLog(@"send %lld bytes", totalSendLen);
     session.resCode_ = FTP_TRANSFEROK;
     session.resMessage_ = @"Transfer complete. v^^v";
-    return sendLen;
+    return totalSendLen;
 }
 
-- (int) recvFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle {
+- (unsigned long long) recvFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle {
     int bytes;
-    unsigned long writeLen = 0;
-    char recvBuffer[512] = {0};
+    unsigned long long writeLen = 0;
+    char recvBuffer[P_READ_FILE_SIZE] = {0};
     NSData* recvData;
     
     while (1) {
-        bytes = recv(session.dataFd_, recvBuffer, sizeof(recvBuffer), 0);
+        bytes = recv(session.dataFd_, recvBuffer, sizeof(recvBuffer), SO_NOSIGPIPE);
         if (bytes < 0) {
-            NSLog(@"[ERROR] recvFile:fileHandle:");
-            return 0;
+            if (errno == EPIPE) {
+                NSLog(@"[ERROR] SIGPIPE!!");
+                session.resCode_ = FTP_BADSENDFILE;
+                session.resMessage_ = @"Connection is closed.";
+                return 0;
+            }
+            NSLog(@"[ERROR] Failed to write file.");
+            session.resCode_ = FTP_BADSENDFILE;
+            session.resMessage_ = @"Failed to write file.";
+            return bytes;
         }
         if (bytes == 0) {
             break;
         }
-        recvData = [NSData dataWithBytes:recvBuffer length:bytes];
+		recvData = [[NSData alloc] initWithBytes:recvBuffer length:bytes];
         [fileHandle writeData:recvData];
         writeLen += bytes;
+
+        // キャッシュとディスク上のファイルを同期する
+        [fileHandle synchronizeFile];
+		
+		[recvData release];
     }
     
     // キャッシュとディスク上のファイルを同期する
     [fileHandle synchronizeFile];
+    
+    session.resCode_ = FTP_TRANSFEROK;
+    session.resMessage_ = @"Transfer file successful.";
     return writeLen;
 }
 
