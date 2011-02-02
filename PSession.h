@@ -42,6 +42,7 @@ struct Psockaddr {
     BOOL isAscii_;
     BOOL isEpsvAll_;
     BOOL isPasv_;
+    BOOL isAbort_;
     
     // Request Buffers
     NSString* reqCommand_;
@@ -59,6 +60,9 @@ struct Psockaddr {
     // Secure connections state
     BOOL isControlUseSSL_;
     BOOL isDataUseSSL_;
+    
+    // Data IO operation queue
+    NSOperationQueue* operationQueue_;
 }
 
 @property (assign) CFSocketNativeHandle controlFd_;
@@ -78,6 +82,7 @@ struct Psockaddr {
 @property (assign) BOOL isAscii_;
 @property (assign) BOOL isEpsvAll_;
 @property (assign) BOOL isPasv_;
+@property (assign) BOOL isAbort_;
 
 @property (assign) NSString* reqCommand_;
 @property (assign) NSString* reqMessage_;
@@ -91,5 +96,6 @@ struct Psockaddr {
 @property (assign) BOOL isControlUseSSL_;
 @property (assign) BOOL isDataUseSSL_;
 
+@property (assign) NSOperationQueue* operationQueue_;
 
 @end

@@ -27,6 +27,7 @@
 @synthesize isAscii_;
 @synthesize isEpsvAll_;
 @synthesize isPasv_;
+@synthesize isAbort_;
 
 @synthesize reqCommand_;
 @synthesize reqMessage_;
@@ -39,6 +40,7 @@
 
 @synthesize isControlUseSSL_;
 @synthesize isDataUseSSL_;
+@synthesize operationQueue_;
 
 -(id)init {
     self = [super init];
@@ -60,6 +62,7 @@
     isAscii_ = NO;
     isEpsvAll_ = NO;
     isPasv_ = NO;
+    isAbort_ = NO;
     
     reqMessage_ = nil;
     reqMessage_ = nil;
@@ -72,6 +75,8 @@
     
     isControlUseSSL_ = NO;
     isDataUseSSL_ = NO;
+    
+    operationQueue_ = [[NSOperationQueue alloc] init];
     
     return self;
 }
@@ -89,6 +94,9 @@
         free(pRemoteAddress_);
         pRemoteAddress_ = NULL;
     }
+    
+    [operationQueue_ release];
+    
     [super dealloc];
 }
 

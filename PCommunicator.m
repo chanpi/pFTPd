@@ -197,6 +197,9 @@
 //            } else if ([session.reqCommand_ isEqualToString:@"MDTM"]) {
 //                [postLogin handleMDTM:session];                
                 
+            } else if ([session.reqCommand_ isEqualToString:@"ABOR"]) {
+                [postLogin handleABOR:session];
+                
             } else if ([session.reqCommand_ isEqualToString:@"QUIT"]) {
                 [postLogin handleQUIT:session];
                 

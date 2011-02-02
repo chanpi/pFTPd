@@ -23,6 +23,7 @@
 #define FTP_SYSTOK          215
 #define FTP_GREET           220
 #define FTP_GOODBYE         221
+#define FTP_ABOROK          226
 #define FTP_TRANSFEROK      226
 #define FTP_PASVOK          227
 #define FTP_EPSVOK          229
