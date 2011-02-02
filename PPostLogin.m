@@ -30,6 +30,8 @@
 - (BOOL) dataTransferChecksOK:(PSession*)session;
 - (int) getRemoteDataFd:(PSession*)session statusMessage:(NSString*)statusMessage;
 - (NSUInteger)separateString:(NSString*)fromString sep:(NSString*)sepString tokens:(NSArray**)tokens;
+
+- (BOOL) addOperation:(NSOperation*)operation session:(PSession*)session;
 @end
 
 
@@ -379,16 +381,8 @@
         PDataParam* param = [[PDataParam alloc]
                              initWithSendData:[directory UTF8String] dataSize:strlen([directory UTF8String]) session:session dataFd:session.dataFd_];
         NSInvocationOperation* operation = [[NSInvocationOperation alloc] initWithTarget:dataIO_ selector:@selector(sendData:) object:param];
-        [session.operationQueue_ addOperation:operation];
-        addOperation = YES;
-        session.dataFd_ = -1;
-        [operation release];
-        
-        /*
-        if ([dataIO_ sendData:session data:[directory UTF8String] dataSize:strlen([directory UTF8String])] > 0) {
-            isSendDataCompleted = YES;
-        }
-         */
+        addOperation = [self addOperation:operation session:session];
+                
     }
     @catch (NSException *exception) {
         NSLog(@"[ERROR] %@ communicate: %@: %@", NSStringFromClass([self class]), [exception name], [exception reason]);
@@ -396,15 +390,6 @@
         session.resMessage_ = [exception reason];
     }
     
-    /*
-    if (isSendDataCompleted) {
-        session.resCode_ = FTP_TRANSFEROK;
-        session.resMessage_ = @"Directory send OK.";
-    } else {
-        session.resCode_ = FTP_BADSENDFILE;
-        session.resMessage_ = @"Failed to list up files.";
-    }
-    */
     if (!addOperation) {
         [ctrlIO_ sendResponseNormal:session];
         
@@ -520,11 +505,12 @@
 - (void) handleABOR:(PSession*)session {
     session.isAbort_ = YES;
     
-//    [session.operationQueue_ cancelAllOperations];
     [session.operationQueue_ waitUntilAllOperationsAreFinished];
     session.resCode_ = FTP_ABOROK;
     session.resMessage_ = @"Aborted.";
     [ctrlIO_ sendResponseNormal:session];
+    
+    session.isAbort_ = NO;
 }
 
 
@@ -615,13 +601,7 @@
 
         PDataParam* param = [[PDataParam alloc] initWithSendFile:fileHandle fileSize:fileSize session:session dataFd:session.dataFd_];
         NSInvocationOperation* operation = [[NSInvocationOperation alloc] initWithTarget:dataIO_ selector:@selector(sendFile:) object:param];
-        [session.operationQueue_ addOperation:operation];
-        addOperation = YES;
-        session.dataFd_ = -1;
-        [operation release];
-        
-        
-//        [dataIO_ sendFile:session fileHandle:fileHandle fileSize:fileSize];
+        addOperation = [self addOperation:operation session:session];
         
     }
     @catch (NSException *exception) {
@@ -643,12 +623,6 @@
         close(session.pasvListenFd_);
         session.pasvListenFd_ = -1;
     }
-    /*
-    if (session.pPortSockAddress_ != NULL) {
-        free(session.pPortSockAddress_);
-        session.pPortSockAddress_ = NULL;
-    }
-     */
 }
 
 - (void) handleSTOR:(PSession*)session {
@@ -713,13 +687,7 @@
         } else {
             PDataParam* param = [[PDataParam alloc] initWithRecvFile:fileHandle session:session dataFd:session.dataFd_];            
             NSInvocationOperation* operation = [[NSInvocationOperation alloc] initWithTarget:dataIO_ selector:@selector(recvFile:) object:param];
-            [session.operationQueue_ addOperation:operation];
-            addOperation = YES;
-            session.dataFd_ = -1;
-            [operation release];    // タスク終了後にリリースされる
-            
-            //[dataIO_ recvFile:session fileHandle:fileHandle];
-            //[fileHandle closeFile];
+            addOperation = [self addOperation:operation session:session];
         }
     }
     
@@ -797,10 +765,7 @@
         
         PDataParam* param = [[PDataParam alloc] initWithRecvFile:fileHandle session:session dataFd:session.dataFd_];
         NSInvocationOperation* operation = [[NSInvocationOperation alloc] initWithTarget:dataIO_ selector:@selector(recvFile:) object:param];
-        [session.operationQueue_ addOperation:operation];
-        addOperation = YES;
-        session.dataFd_ = -1;
-        [operation release];
+        addOperation = [self addOperation:operation session:session];
         
         /*
         if ([dataIO_ recvFile:session fileHandle:fileHandle] < 0) {
@@ -1017,6 +982,13 @@
 - (NSUInteger)separateString:(NSString*)fromString sep:(NSString*)sepString tokens:(NSArray**)tokens {
     *tokens = [fromString componentsSeparatedByString:sepString];
     return [*tokens count];
+}
+
+- (BOOL) addOperation:(NSOperation*)operation session:(PSession*)session {
+    [session.operationQueue_ addOperation:operation];
+    session.dataFd_ = -1;
+    [operation release];
+    return YES;
 }
 
 - (void)dealloc {

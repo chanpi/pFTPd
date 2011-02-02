@@ -16,6 +16,7 @@
 
 #include <unistd.h>
 #include <stdlib.h>
+#include <netinet/tcp.h>
 
 PCommunicator* communicator_;
 
@@ -30,6 +31,19 @@ static void AcceptCallback(CFSocketRef socket, CFSocketCallBackType type, CFData
     PSession* session = [[PSession alloc] init];
     session.controlFd_ = *(CFSocketNativeHandle *)data;
     session.controlPort_ = *(unsigned short*)info;
+    
+    int option = 1;
+    setsockopt(session.controlFd_, SOL_SOCKET, SO_KEEPALIVE, (const void *)&option, sizeof(option));
+    
+    option = 50;
+    setsockopt(session.controlFd_, IPPROTO_TCP, TCP_KEEPALIVE, (const void *)&option, sizeof(option));
+    /*
+    option = 60;
+    setsockopt(session.controlFd_, IPPROTO_TCP, TCP_KEEPINTVL, (const void *)&option, sizeof(option));
+
+    option = 20;
+    setsockopt(session.controlFd_, IPPROTO_TCP, TCP_KEEPCNT, (const void *)&option, sizeof(option));
+     */
 
     // get commandfd
     [NSThread detachNewThreadSelector:@selector(communicate:) toTarget:communicator_ withObject:session];
@@ -62,6 +76,7 @@ static void AcceptCallback(CFSocketRef socket, CFSocketCallBackType type, CFData
     
     // TIME_WAIT状態の場合、ローカルアドレスを再利用
     setsockopt(CFSocketGetNative(listenSocket_), SOL_SOCKET, SO_REUSEADDR, (void*)&yes, sizeof(yes));
+    setsockopt(CFSocketGetNative(listenSocket_), SOL_SOCKET, SO_KEEPALIVE, (void*)&yes, sizeof(yes));
     
     // bind/listen
     addr.sin_len = sizeof(addr);

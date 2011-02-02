@@ -22,13 +22,6 @@
     size_t size = sizeof(buffer);
     
     while (!strchr((char*)buffer, '\n') && recvLen < size) {
-		/*
-		bytes = recv(session.controlFd_, buffer + recvLen, size - recvLen, 0);
-		if (bytes < 0) {
-			NSLog(@"[ERROR] recv!!!!!");
-			return -1;
-		}
-		 */
 		bytes = CFReadStreamRead(session.readStream_, buffer + recvLen, size - recvLen);
         if (bytes < 0) {
             CFErrorRef error = CFReadStreamCopyError(session.readStream_);
@@ -108,12 +101,6 @@
 
 // write message for fd 0
 - (size_t) writeResponseRaw:(PSession*)session {
-    /*
-     char message[20];
-     strcpy(message, [session.resMessage_ UTF8String]);
-     size_t messageLen = [session.resMessage_ length];
-     return fwrite(message, 1, messageLen, P_COMMAND_FD);
-     */
     const char* buffer = [session.resMessage_ UTF8String];
     size_t sendLen = 0;
     UInt8 count = strlen(buffer);

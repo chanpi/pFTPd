@@ -17,6 +17,11 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+
+@interface PDataParam (Local)
+- (void) initialize;
+@end
+
 @implementation PDataParam
 
 @synthesize dataFd_;
@@ -25,58 +30,71 @@
 @synthesize dataSize_;
 @synthesize data_;
 
+- (void) initialize {
+    dataFd_ = 0;
+    session_ = nil;
+    fileHandle_ = nil;
+    dataSize_ = 0;
+    data_ = NULL;
+}
+
 - (id) init {
     self = [super init];
-    self.dataFd_ = 0;
-    self.session_ = nil;
-    self.fileHandle_ = nil;
-    self.dataSize_ = 0;
-    self.data_ = NULL;
+    [self initialize];
     return self;
 }
 
 - (id) initWithSendData:(const void*)data dataSize:(unsigned long long)dataSize session:(PSession*)session dataFd:(CFSocketNativeHandle)dataFd {
     self = [super init];
+    [self initialize];
     
-    self.data_ = malloc(dataSize);
-    memcpy(self.data_, data, dataSize);
+    data_ = malloc(dataSize);
+    memcpy(data_, data, dataSize);
     
-    self.dataSize_ = dataSize;
-    self.session_ = session;
-    self.dataFd_ = dataFd;
-    self.fileHandle_ = nil;
+    dataSize_ = dataSize;
+    session_ = session;
+    dataFd_ = dataFd;
+	[session_ retain];
     
     return self;
 }
 
 - (id) initWithSendFile:(NSFileHandle*)fileHandle fileSize:(unsigned long long)fileSize session:(PSession*)session dataFd:(CFSocketNativeHandle)dataFd {
     self = [super init];
+    [self initialize];
     
-    self.data_ = NULL;
-    self.dataSize_ = fileSize;
-    self.session_ = session;
-    self.dataFd_ = dataFd;
-    self.fileHandle_ = fileHandle;
+    dataSize_ = fileSize;
+    session_ = session;
+    dataFd_ = dataFd;
+    fileHandle_ = fileHandle;
+	[session_ retain];
+	[fileHandle_ retain];
     
     return self;
 }
 
 - (id) initWithRecvFile:(NSFileHandle*)fileHandle session:(PSession*)session dataFd:(CFSocketNativeHandle)dataFd {
     self = [super init];
+    [self initialize];
     
-    self.data_ = NULL;
-    self.dataSize_ = 0;
-    self.session_ = session;
-    self.dataFd_ = dataFd;
-    self.fileHandle_ = fileHandle;
+    session_ = session;
+    dataFd_ = dataFd;
+    fileHandle_ = fileHandle;
+	[session_ retain];
+	[fileHandle_ retain];
     
     return self;
 }
 
 - (void) dealloc {
-    if (self.data_ != NULL) {
-        free(self.data_);
+    if (data_ != NULL) {
+        free(data_);
+        data_ = NULL;
     }
+	if (fileHandle_ != nil) {
+		[fileHandle_ release];
+	}
+	[session_ release];
     [super dealloc];
 }
 
@@ -84,6 +102,7 @@
 
 @interface PDataIO (Local)
 - (void) initDataSockParams:(PSession*)session socketFd:(int)socketFd;
+- (void) socketIOError:(PSession*)session ctrlIO:(PControlIO*)ctrlIO;
 @end
 
 @implementation PDataIO
@@ -173,7 +192,7 @@
 //    [priv release];
 }
 
-//- (unsigned long long) sendData:(PSession*)session data:(const void*)data dataSize:(unsigned long long)dataSize {
+
 - (void) sendData:(id)param {
     PSession* session = ((PDataParam*)param).session_;
     CFSocketNativeHandle dataFd = ((PDataParam*)param).dataFd_;
@@ -192,19 +211,7 @@
         while (sendLen < dataSize && !session.isAbort_) {
             bytes = send(dataFd, data + sendLen, dataSize - sendLen, SO_NOSIGPIPE);
             if (bytes < 0) {
-                @synchronized(session) {
-                    if (errno == EPIPE) {
-                        NSLog(@"[ERROR] SIGPIPE!!!");
-                        session.resCode_ = FTP_BADSENDFILE;
-                        session.resMessage_ = @"Connection is closed.";
-                    } else {            
-                        NSLog(@"[ERROR] sendData()");
-                        session.resCode_ = FTP_BADSENDFILE;
-                        session.resMessage_ = @"Requested action aborted. Local error in processing : send";
-                    }
-                    [ctrlIO sendResponseNormal:session];                    
-                }
-                
+                [self socketIOError:session ctrlIO:ctrlIO];
                 NSException* ex = [NSException exceptionWithName:@"PException" reason:@"send() : send error." userInfo:nil];
                 @throw ex;
             }
@@ -236,7 +243,6 @@
     }
 }
 
-//- (unsigned long long) sendFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle fileSize:(unsigned long long)fileSize {
 - (void) sendFile:(id)param {
     PSession* session = ((PDataParam*)param).session_;
     CFSocketNativeHandle dataFd = ((PDataParam*)param).dataFd_;
@@ -264,20 +270,7 @@
             while (sendLen < leftFileSize && !session.isAbort_) {
                 bytes = send(dataFd, [sendData bytes] + sendLen, leftFileSize - sendLen, SO_NOSIGPIPE);
                 if (bytes < 0) {
-                    
-                    @synchronized(session) {
-                        if (errno == EPIPE) {
-                            NSLog(@"[ERROR] SIGPIPE!!");
-                            session.resCode_ = FTP_BADSENDFILE;
-                            session.resMessage_ = @"Connection is closed.";
-                        } else {
-                            NSLog(@"[ERROR] sendFile:fileHandle:fileSize; errno = %d", errno);
-                            session.resCode_ = FTP_BADSENDFILE;
-                            session.resMessage_ = @"Failed to transfer file.";
-                        }
-                        [ctrlIO sendResponseNormal:session];
-                    }
-                    
+                    [self socketIOError:session ctrlIO:ctrlIO];
                     NSException* ex = [NSException exceptionWithName:@"PException" reason:@"send() : send error." userInfo:nil];
                     @throw ex;
                 }
@@ -289,25 +282,17 @@
         }
         
         @synchronized(session) {
-            if (session.isAbort_) {
-                if (totalSendLen < fileSize) {
-                    session.resCode_ = FTP_BADSENDNET;
-                    session.resMessage_ = @"Transfer aborted.";
-                }
-            } else {
-                NSLog(@"send %lld bytes", totalSendLen);
+            if (totalSendLen < fileSize && session.isAbort_) {
+                session.resCode_ = FTP_BADSENDNET;
+                session.resMessage_ = @"Transfer aborted.";
+            } else if (totalSendLen == fileSize) {
                 session.resCode_ = FTP_TRANSFEROK;
                 session.resMessage_ = @"Transfer complete. v^^v";
+            } else {
+                session.resCode_ = FTP_BADSENDFILE;
+                session.resMessage_ = @"Failed to list up files.";
             }
             [ctrlIO sendResponseNormal:session];
-            
-            /*
-            // TODO !!!! malloc する意味はあるのか？？？
-            if (session.pPortSockAddress_ != NULL) {
-                free(session.pPortSockAddress_);
-                session.pPortSockAddress_ = NULL;
-            }
-             */
         }
     }
     @catch (NSException *exception) {
@@ -322,7 +307,6 @@
     }
 }
 
-//- (unsigned long long) recvFile:(PSession*)session fileHandle:(NSFileHandle*)fileHandle {
 - (void) recvFile:(id)param {
     PSession* session = ((PDataParam*)param).session_;
     CFSocketNativeHandle dataFd = ((PDataParam*)param).dataFd_;
@@ -334,11 +318,12 @@
     char recvBuffer[P_READ_FILE_SIZE] = {0};
     NSData* recvData;
     
-    struct timeval timeVal;
-    fd_set fdset;
+//    struct timeval timeVal;
+//    fd_set fdset;
     
     @try {
         while (!session.isAbort_) {
+            /*
             FD_ZERO(&fdset);
             FD_SET(dataFd, &fdset);
             
@@ -360,22 +345,11 @@
                 
                 NSException* ex = [NSException exceptionWithName:@"PException" reason:@"select() : select error." userInfo:nil];
                 @throw ex;
-            }
+            }*/
             
-            bytes = recv(dataFd, recvBuffer, sizeof(recvBuffer), SO_NOSIGPIPE);
+            bytes = recv(dataFd, recvBuffer, sizeof(recvBuffer), 0);
             if (bytes < 0) {
-                @synchronized(session) {
-                    if (errno == EPIPE) {
-                        NSLog(@"[ERROR] SIGPIPE!!");
-                        session.resCode_ = FTP_BADSENDFILE;
-                        session.resMessage_ = @"Connection is closed.";
-                    } else {
-                        NSLog(@"[ERROR] Failed to write file.");
-                        session.resCode_ = FTP_BADSENDFILE;
-                        session.resMessage_ = @"Failed to write file.";
-                    }
-                    [ctrlIO sendResponseNormal:session];
-                }
+                [self socketIOError:session ctrlIO:ctrlIO];
                 
                 NSException* ex = [NSException exceptionWithName:@"PException" reason:@"recv() : recv error." userInfo:nil];
                 @throw ex;
@@ -397,7 +371,7 @@
         [fileHandle synchronizeFile];
         
         @synchronized(session) {
-            if (!session.isAbort_) {
+            if (session.isAbort_) {
                 session.resCode_ = FTP_BADSENDNET;
                 session.resMessage_ = @"Transfer aborted.";
             } else {
@@ -419,6 +393,7 @@
     }
 }
 
+
 - (void) initDataSockParams:(PSession*)session socketFd:(int)socketFd {
     PSysUtil* sysUtil = [[PSysUtil alloc] init];
     if (session.dataFd_ != -1) {
@@ -433,6 +408,21 @@
     //[sysUtil installIOHandler:handleIO session:session];
     //[self startDataAlarm:session];    // TODO!!! signalとしてタイムアウトを設定しているみたい
     [sysUtil release];
+}
+
+- (void) socketIOError:(PSession*)session ctrlIO:(PControlIO *)ctrlIO {
+    @synchronized(session) {
+        if (errno == EPIPE) {
+            NSLog(@"[ERROR] SIGPIPE!!");
+            session.resCode_ = FTP_BADSENDFILE;
+            session.resMessage_ = @"Connection is closed.";
+        } else {
+            NSLog(@"[ERROR] sendFile:fileHandle:fileSize; errno = %d", errno);
+            session.resCode_ = FTP_BADSENDFILE;
+            session.resMessage_ = @"Failed to transfer file.";
+        }
+        [ctrlIO sendResponseNormal:session];
+    }
 }
 
 @end
