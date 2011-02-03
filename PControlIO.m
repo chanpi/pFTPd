@@ -7,6 +7,7 @@
 //
 
 #import "PControlIO.h"
+#include <unistd.h>
 
 @interface PControlIO (Local)
 - (int) sendResponse:(PSession*)session;
@@ -21,18 +22,12 @@
     int bytes;
     size_t size = sizeof(buffer);
     
-    while (!strchr((char*)buffer, '\n') && recvLen < size) {
-		bytes = CFReadStreamRead(session.readStream_, buffer + recvLen, size - recvLen);
+    while (!strchr((char*)buffer, '\n') && recvLen < size && session.isSessonContinue_) {
+        bytes = recv(session.controlFd_, buffer+recvLen, size-recvLen, 0);
         if (bytes < 0) {
-            CFErrorRef error = CFReadStreamCopyError(session.readStream_);
-            CFIndex eIndex = CFErrorGetCode(error);
-            CFStringRef eString = CFErrorCopyDescription(error);
-            NSLog(@"[ERROR] CFReadStreamRead() %ld %@", eIndex, eString);
+            fprintf(stderr, "[ERROR] recv: %d\n", errno);
             session.reqCommand_ = [[NSString alloc] initWithString:@"ERROR"];
-            session.reqMessage_ = [[NSString alloc] initWithString:(NSString*)eString];
-            CFRelease(eString);
-            CFRelease(error);
-            
+            session.reqMessage_ = [[NSString alloc] initWithString:@"recv error"];
             return -1;
         }
         recvLen += bytes;
@@ -42,9 +37,7 @@
     char tempValue[512] = {0};
     char* p = NULL;
 	
-	
-	
-	fprintf(stderr, ">>> %s[%ld bytes]\n", (char*)buffer, recvLen);
+	fprintf(stderr, ">>> %s\n", (char*)buffer);
     sscanf((const char*)buffer, "%s ", tempCommand);
     if (strlen(tempCommand) == 0) {
         return -2;
@@ -53,9 +46,15 @@
     if ((p = strchr((const char*)buffer, ' ')) != NULL) {
         strcpy(tempValue, p+1);
     }
+    
     session.reqCommand_ = [[NSString alloc] initWithUTF8String:tempCommand];
 	if (strlen(tempValue) != 0) {
-		session.reqMessage_ = [[NSString alloc] initWithString:[self removeWhiteSpace:[NSString stringWithUTF8String:tempValue]]];
+		NSString* value = [NSString stringWithUTF8String:tempValue];
+		if (value == nil) {
+			value = [NSString stringWithCString:tempValue encoding:NSShiftJISStringEncoding];
+		}
+        value = [self removeWhiteSpace:value];
+		session.reqMessage_ = [[NSString alloc] initWithString:(value == nil ? @"" : value)];
 	} else {
 		session.reqMessage_ = [[NSString alloc] initWithString:@""];
 	}
@@ -70,20 +69,15 @@
     UInt8 count = strlen(buffer);
     int bytes;
     
-    fprintf(stderr, "send: %s", buffer);
-    while (sendLen < count) {
-        bytes = CFWriteStreamWrite(session.writeStream_, (UInt8*)buffer + sendLen, count - sendLen);
+    while (sendLen < count && session.isSessonContinue_) {
+        bytes = send(session.controlFd_, buffer+sendLen, count-sendLen, 0);
         if (bytes < 0) {
-            CFErrorRef error = CFWriteStreamCopyError(session.writeStream_);
-            CFIndex eIndex = CFErrorGetCode(error);
-            CFStringRef eString = CFErrorCopyDescription(error);
-            NSLog(@"[ERROR] CFWriteStreamWrite() %ld %@", eIndex, eString);
-            CFRelease(eString);
-            CFRelease(error);
-            return bytes;
+            fprintf(stderr, "[ERROR] send: %d\n", errno);
+            return -1;
         }
         sendLen += bytes;
     }
+    fprintf(stderr, "sent: %s", buffer);
     return sendLen;
 }
 
@@ -106,17 +100,11 @@
     UInt8 count = strlen(buffer);
     int bytes;
     
-    while (sendLen < count) {
-        bytes = CFWriteStreamWrite(session.writeStream_, (UInt8*)buffer + sendLen, count - sendLen);
+    while (sendLen < count && session.isSessonContinue_) {
+        bytes = send(session.controlFd_, buffer+sendLen, count-sendLen, 0);
         if (bytes < 0) {
-            // TODO!!!!!
-            CFErrorRef error = CFWriteStreamCopyError(session.writeStream_);
-            CFIndex eIndex = CFErrorGetCode(error);
-            CFStringRef eString = CFErrorCopyDescription(error);
-            NSLog(@"[ERROR] CFWriteStreamWrite() %ld %@", eIndex, eString);
-            CFRelease(eString);
-            CFRelease(error);
-            return 0;
+            fprintf(stderr, "[ERROR] send: %d\n", errno);
+            return -1;
         }
         sendLen += bytes;
     }
@@ -125,7 +113,7 @@
 
 - (NSString*) removeWhiteSpace:(NSString*)string {
     NSCharacterSet* charset = [NSCharacterSet whitespaceAndNewlineCharacterSet];
-    NSLog(@"%@", [string stringByTrimmingCharactersInSet:charset]);
+    NSLog(@"removeWhiteSpace:[%@]", [string stringByTrimmingCharactersInSet:charset]);
     return [string stringByTrimmingCharactersInSet:charset];
 }
 

@@ -15,6 +15,7 @@
 #import "PDefs.h"
 
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
 #include <string.h>
@@ -46,7 +47,8 @@
      [sysUtil dupFd2:session.controlFd_ newFd:2];        
      */
     
-    // main: session_init途中！！
+    [sysUtil activateKeepAlive:session.controlFd_];
+    
     struct sockaddr tempAddress;
     socklen_t length = sizeof(tempAddress);
     if (getpeername(session.controlFd_, &tempAddress, &length) == 0) {
@@ -67,12 +69,8 @@
         memcpy(session.pLocalAddress_, &tempAddress, sizeof(tempAddress));
         NSLog(@"getsockname successful.");
     }
+    session.isSessonContinue_ = YES;
     
-    /*
-     if (anonymousEnabled) {
-     // ftp_usernameでログイン
-     }
-     */
     [sysUtil release];
 }
 
@@ -98,13 +96,6 @@
             NSException* ex =[NSException exceptionWithName:@"PException" reason:@"CFStreamCreatePairWithSocket()" userInfo:nil];
             @throw ex;
         }
-        
-        session.readStream_ = readStream;
-        session.writeStream_ = writeStream;
-        
-        CFWriteStreamOpen(session.writeStream_);
-        CFReadStreamOpen(session.readStream_);
-        
         [preLogin startLogin:session];
         
         while (1) {
@@ -114,6 +105,7 @@
                 // タイムアウトでセッションが切断されている可能性があるため返信できない
                 [session.reqCommand_ release];
                 [session.reqMessage_ release];
+                session.isSessonContinue_ = NO;
                 break;
             } else if (ret == -2) {
                 continue;
@@ -225,19 +217,7 @@
         NSLog(@"[ERROR] %@ communicate: %@: %@", NSStringFromClass([self class]), [exception name], [exception reason]);
     }
 	@finally {
-		close(session.controlFd_);
-		session.controlFd_ = -1;
-		
-		if (session.dataFd_ != -1) {
-			close(session.dataFd_);
-			session.dataFd_ = -1;
-		}
-		
-		if (session.pasvListenFd_ != -1) {
-			close(session.pasvListenFd_);
-			session.pasvListenFd_ = -1;
-		}
-		
+        /*
 		if (session.readStream_ != NULL) {
 			CFReadStreamClose(session.readStream_);
 			CFRelease(session.readStream_);
@@ -248,16 +228,35 @@
 			CFRelease(session.writeStream_);
 			session.writeStream_ = NULL;
 		}
+         */
+        if (session.controlFd_ != -1) {
+            char tempBuffer[128];
+            shutdown(session.controlFd_, SHUT_WR);
+            recv(session.controlFd_, tempBuffer, sizeof(tempBuffer), 0);
+            shutdown(session.controlFd_, SHUT_RDWR);
+            close(session.controlFd_);
+            session.controlFd_ = -1;
+        }
+
+		if (session.dataFd_ != -1) {
+			close(session.dataFd_);
+			session.dataFd_ = -1;
+		}
+		
+		if (session.pasvListenFd_ != -1) {
+			close(session.pasvListenFd_);
+			session.pasvListenFd_ = -1;
+		}
 		
 		if (preLogin != nil) {
 			[preLogin release];
 			preLogin = nil;
 		}
-        
 		[ctrlIO release];
 		[postLogin release];
-		[session release];  // 必ずrelease
-		[pool release];		
+        
+        [session release];  // 必ずrelease
+		[pool release];
 	}
 }
 

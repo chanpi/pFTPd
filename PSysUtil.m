@@ -25,7 +25,8 @@
 - (void) getHomeDocumentDirectory:(NSString**)homeDocumentDirectoryPath {
     // ホームディレクトリ直下のDocumentsフォルダ
     NSArray* paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    *homeDocumentDirectoryPath = [[NSString alloc] initWithString:[paths objectAtIndex:0]];
+    NSString* value = [paths objectAtIndex:0];
+    *homeDocumentDirectoryPath = [[NSString alloc] initWithString:(value == nil ? @"" : value)];
 }
 
 - (void) dupFd2:(CFSocketNativeHandle)oldFd newFd:(CFSocketNativeHandle)newFd {

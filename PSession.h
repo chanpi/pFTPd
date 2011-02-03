@@ -26,6 +26,7 @@ struct Psockaddr {
     unsigned short controlPort_;
     struct Psockaddr* pLocalAddress_;
     struct Psockaddr* pRemoteAddress_;
+    BOOL isSessonContinue_;
     
     // Details of the Data connection
     CFSocketNativeHandle pasvListenFd_;
@@ -54,8 +55,8 @@ struct Psockaddr {
     NSString* resMessage_;
     
     // Control Stream
-    CFReadStreamRef readStream_;
-    CFWriteStreamRef writeStream_;
+//    CFReadStreamRef readStream_;
+//    CFWriteStreamRef writeStream_;
     
     // Secure connections state
     BOOL isControlUseSSL_;
@@ -69,6 +70,7 @@ struct Psockaddr {
 @property (assign) unsigned short controlPort_;
 @property (assign) struct Psockaddr* pLocalAddress_;
 @property (assign) struct Psockaddr* pRemoteAddress_;
+@property (assign) BOOL isSessonContinue_;
 
 @property (assign) CFSocketNativeHandle pasvListenFd_;
 @property (assign) CFSocketNativeHandle dataFd_;
@@ -90,8 +92,8 @@ struct Psockaddr {
 @property (assign) NSString* resSep_;
 @property (assign) NSString* resMessage_;
 
-@property (assign) CFReadStreamRef readStream_;
-@property (assign) CFWriteStreamRef writeStream_;
+//@property (assign) CFReadStreamRef readStream_;
+//@property (assign) CFWriteStreamRef writeStream_;
 
 @property (assign) BOOL isControlUseSSL_;
 @property (assign) BOOL isDataUseSSL_;

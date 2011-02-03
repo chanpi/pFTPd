@@ -14,6 +14,7 @@
 @synthesize controlPort_;
 @synthesize pLocalAddress_;
 @synthesize pRemoteAddress_;
+@synthesize isSessonContinue_;
 
 @synthesize pasvListenFd_;
 @synthesize dataFd_;
@@ -35,15 +36,14 @@
 @synthesize resSep_;
 @synthesize resMessage_;
 
-@synthesize readStream_;
-@synthesize writeStream_;
-
 @synthesize isControlUseSSL_;
 @synthesize isDataUseSSL_;
 @synthesize operationQueue_;
 
 -(id)init {
     self = [super init];
+    
+    isSessonContinue_ = NO;
     
     controlFd_ = 0;
     controlPort_ = 0;
@@ -69,9 +69,6 @@
     resCode_ = 0;
     resSep_ = @" ";
     resMessage_ = nil;
-    
-    readStream_ = NULL;
-    writeStream_ = NULL;
     
     isControlUseSSL_ = NO;
     isDataUseSSL_ = NO;

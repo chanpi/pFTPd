@@ -286,7 +286,8 @@
         NSArray* tokens = [session.reqMessage_ componentsSeparatedByString:@" "];
         if ([tokens count] > 1) {
             [session.reqMessage_ release];  // 一度allocしたものをrelease
-            session.reqMessage_ = [[NSString alloc] initWithString:[tokens objectAtIndex:1]];
+            NSString* value = [tokens objectAtIndex:1];
+            session.reqMessage_ = [[NSString alloc] initWithString:(value == nil ? @"" : value)];
         } else {
             [session.reqMessage_ release];  // 一度allocしたものをrelease
             session.reqMessage_ = [[NSString alloc] initWithString:@""];
@@ -326,11 +327,8 @@
         }
     }
     
-    NSLog(@"currentDir = %@[%d]", dirPath, [dirPath length]);
-    
     NSMutableString* directory = [[NSMutableString alloc] init];
     [sysUtil getDirectoryAttributes:&directory directoryPath:dirPath];
-    NSLog(@">>>\n%@", directory);
     if (homeDocumentDirectory != nil) {
         [homeDocumentDirectory release];
         homeDocumentDirectory = nil;
@@ -350,8 +348,7 @@
             session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)&address, &sockLen);
             int yes = 1;
             setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
-            
-            NSLog(@"accepted!!!!");
+
         } else {
             session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
             if (session.dataFd_ < 0) {
@@ -767,14 +764,6 @@
         NSInvocationOperation* operation = [[NSInvocationOperation alloc] initWithTarget:dataIO_ selector:@selector(recvFile:) object:param];
         addOperation = [self addOperation:operation session:session];
         
-        /*
-        if ([dataIO_ recvFile:session fileHandle:fileHandle] < 0) {
-            NSLog(@"[ERROR] Failed to write file.");
-            session.resCode_ = FTP_BADSENDFILE;
-            session.resMessage_ = @"Failed to write file.";
-        }
-        [fileHandle closeFile];
-         */
     }
     
     if (!addOperation) {
@@ -843,7 +832,7 @@
 
 - (void) handleNOOP:(PSession*)session {
     session.resCode_ = FTP_NOOPOK;
-    session.resMessage_ = @"Ok";
+    session.resMessage_ = @"OK";
     [ctrlIO_ sendResponseNormal:session];
 }
 
