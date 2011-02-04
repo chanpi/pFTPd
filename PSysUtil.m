@@ -64,7 +64,8 @@
 }
 
 
-- (void) getDirectoryAttributes:(NSMutableString**)infoBuffer directoryPath:(NSString*)directoryPath {    
+- (void) getDirectoryAttributes:(NSMutableString**)infoBuffer directoryPath:(NSString*)directoryPath {
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
     NSFileManager* fileManager = [NSFileManager defaultManager];
     NSMutableArray* files = [[NSMutableArray alloc] initWithArray:[fileManager contentsOfDirectoryAtPath:directoryPath error:nil]];
     
@@ -196,6 +197,7 @@
 //        [*infoBuffer appendFormat:@"%@\r\n", [files objectAtIndex:i]];
     }
     [files release];
+    [pool release];
 }
 
 - (void) getPeerName:(int)fd pSockAddrPtr:(struct Psockaddr*)pSockAddr {
@@ -253,6 +255,14 @@
 - (void) setIptosThroughput:(int)fd {
     int tos = IPTOS_THROUGHPUT;
     setsockopt(fd, IPPROTO_IP, IP_TOS, &tos, sizeof(tos));
+}
+
+- (void) activateNoSigPipe:(int)fd {
+    int yes = 1;
+    int retVal = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
+    if (retVal != 0) {
+        NSLog(@"[ERROR] setsockopt: SO_NOSIGPIPE");
+    }
 }
 
 - (void) activateLinger:(int)fd {

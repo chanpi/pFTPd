@@ -91,7 +91,7 @@
         // create stream
         [preLogin startLogin:session];
         
-        while (1) {
+        while (1) {            
             // request
             ret = [ctrlIO getRequest:session];
             if (ret == -1) {
@@ -175,6 +175,12 @@
                 
             } else if ([session.reqCommand_ isEqualToString:@"DELE"]) {
                 [postLogin handleDELE:session];
+                
+            } else if ([session.reqCommand_ isEqualToString:@"RNFR"]) {
+                [postLogin handleRNFR:session];
+                
+            } else if ([session.reqCommand_ isEqualToString:@"RNTO"]) {
+                [postLogin handleRNTO:session];
                 
             } else if ([session.reqCommand_ isEqualToString:@"REST"]) {
                 [postLogin handleREST:session];                

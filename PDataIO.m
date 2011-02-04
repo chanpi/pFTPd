@@ -194,6 +194,8 @@
 
 
 - (void) sendData:(id)param {
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+    
     PSession* session = ((PDataParam*)param).session_;
     CFSocketNativeHandle dataFd = ((PDataParam*)param).dataFd_;
     const void* data = ((PDataParam*)param).data_;
@@ -206,6 +208,7 @@
     @try {
         if (dataFd == -1) {
             NSLog(@"[ERROR] dataFd is not initialized.");
+            [pool release];
             return;
         }
         while (sendLen < dataSize && !session.isAbort_) {
@@ -241,9 +244,12 @@
         [ctrlIO release];
         [param release];
     }
+    [pool release];
 }
 
 - (void) sendFile:(id)param {
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+
     PSession* session = ((PDataParam*)param).session_;
     CFSocketNativeHandle dataFd = ((PDataParam*)param).dataFd_;
     NSFileHandle* fileHandle = ((PDataParam*)param).fileHandle_;
@@ -265,7 +271,7 @@
             }
             
             sendData = [fileHandle readDataOfLength:leftFileSize];
-            [fileHandle seekToFileOffset:leftFileSize];
+//            [fileHandle seekToFileOffset:leftFileSize];
             
             while (sendLen < leftFileSize && !session.isAbort_) {
                 bytes = send(dataFd, [sendData bytes] + sendLen, leftFileSize - sendLen, SO_NOSIGPIPE);
@@ -278,6 +284,7 @@
             }
             
             totalSendLen += sendLen;
+            [fileHandle seekToFileOffset:totalSendLen];
             sendLen = 0;
         }
         
@@ -305,9 +312,13 @@
         [ctrlIO release];
         [param release];
     }
+    
+    [pool release];
 }
 
 - (void) recvFile:(id)param {
+    NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
+
     PSession* session = ((PDataParam*)param).session_;
     CFSocketNativeHandle dataFd = ((PDataParam*)param).dataFd_;
     NSFileHandle* fileHandle = ((PDataParam*)param).fileHandle_;
@@ -318,12 +329,11 @@
     char recvBuffer[P_READ_FILE_SIZE] = {0};
     NSData* recvData;
     
-//    struct timeval timeVal;
-//    fd_set fdset;
+    struct timeval timeVal;
+    fd_set fdset;
     
     @try {
         while (!session.isAbort_) {
-            /*
             FD_ZERO(&fdset);
             FD_SET(dataFd, &fdset);
             
@@ -345,8 +355,9 @@
                 
                 NSException* ex = [NSException exceptionWithName:@"PException" reason:@"select() : select error." userInfo:nil];
                 @throw ex;
-            }*/
+            }
             
+            memset(recvBuffer, 0x00, sizeof(recvBuffer));
             bytes = recv(dataFd, recvBuffer, sizeof(recvBuffer), 0);
             if (bytes < 0) {
                 [self socketIOError:session ctrlIO:ctrlIO];
@@ -355,6 +366,7 @@
                 @throw ex;
             }
             if (bytes == 0) {
+                NSLog(@"bytes == 0!!!!");
                 break;
             }
             recvData = [[NSData alloc] initWithBytes:recvBuffer length:bytes];
@@ -391,6 +403,8 @@
         [ctrlIO release];
         [param release];
     }
+    
+    [pool release];
 }
 
 

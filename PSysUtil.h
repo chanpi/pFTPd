@@ -26,7 +26,7 @@
 - (void) getSockName:(int)fd pSockAddrPtr:(struct Psockaddr*)pSockAddr;
 - (void) activateKeepAlive:(int)fd;
 - (void) setIptosThroughput:(int)fd;
-
+- (void) activateNoSigPipe:(int)fd;
 - (void) activateLinger:(int)fd;
 - (void) deactivateLingerFailOK:(int)fd;
 

@@ -10,11 +10,13 @@
 #import "PSession.h"
 #import "PControlIO.h"
 #import "PDataIO.h"
+#import "PSysUtil.h"
 
 @interface PPostLogin : NSObject {
 @private
     PControlIO* ctrlIO_;
     PDataIO* dataIO_;
+    PSysUtil* sysUtil_;
 }
 
 - (void) handleSYST:(PSession*)session;
@@ -41,6 +43,9 @@
 - (void) handleSTOR:(PSession*)session;
 - (void) handleAPPE:(PSession*)session;
 - (void) handleDELE:(PSession*)session;
+
+- (void) handleRNFR:(PSession*)session;
+- (void) handleRNTO:(PSession*)session;
 
 - (void) handleREST:(PSession*)session;
 

@@ -38,9 +38,9 @@
 
 @synthesize isControlUseSSL_;
 @synthesize isDataUseSSL_;
-@synthesize operationQueue_;
 
 @synthesize currentDirectory_;
+@synthesize renameFrom_;
 
 -(id)init {
     self = [super init];
@@ -75,9 +75,8 @@
     isControlUseSSL_ = NO;
     isDataUseSSL_ = NO;
     
-    operationQueue_ = [[NSOperationQueue alloc] init];
-    
     currentDirectory_ = nil;
+    renameFrom_ = nil;
     
     return self;
 }
@@ -96,12 +95,15 @@
         pRemoteAddress_ = NULL;
     }
     
-    [operationQueue_ release];
+    if (renameFrom_ != nil) {
+        [renameFrom_ release];
+    }
     
     if (currentDirectory_ != nil) {
         [currentDirectory_ release];
     }
     
+    NSLog(@"session released.....");
     [super dealloc];
 }
 

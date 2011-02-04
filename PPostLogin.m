@@ -8,7 +8,6 @@
 
 #import "PPostLogin.h"
 #import "PCodes.h"
-#import "PSysUtil.h"
 #import "PControlIO.h"
 #import "PPrivilegeSocket.h"
 #import "PSession.h"
@@ -32,7 +31,8 @@
 - (NSUInteger)separateString:(NSString*)fromString sep:(NSString*)sepString tokens:(NSArray**)tokens;
 
 - (BOOL) changeCurrentDirectory:(PSession*)session nextDirectory:(NSString*)nextDirectory;
-- (BOOL) changeDirectoryEnable:(NSString*)path;
+- (BOOL) isChangeDirectoryEnable:(NSString*)path;
+- (BOOL) isFileExist:(NSString*)path;
 - (BOOL) isSymbolicLink:(NSString*)path;
 - (BOOL) getRealPath:(NSString*)linkName realName:(char*)realName;
 - (BOOL) isAbsolutePath:(NSString*)path;
@@ -47,6 +47,7 @@
     self = [super init];
     ctrlIO_ = [[PControlIO alloc] init];
     dataIO_ = [[PDataIO alloc] init];
+    sysUtil_ = [[PSysUtil alloc] init];
     return self;
 }
 
@@ -206,9 +207,7 @@
         return;
     }
     
-    PSysUtil* sysUtil = [[PSysUtil alloc] init];
-    isIPv6 = [sysUtil sockaddrIsIPv6:(const struct sockaddr*)(session.pLocalAddress_)];
-    [sysUtil release];
+    isIPv6 = [sysUtil_ sockaddrIsIPv6:(const struct sockaddr*)(session.pLocalAddress_)];
     
     if (isEPSV && [session.reqMessage_ length] != 0) {
         int argval;
@@ -340,9 +339,7 @@
     }
     
     NSMutableString* directory = [[NSMutableString alloc] init];
-    PSysUtil* sysUtil = [[PSysUtil alloc] init];
-    [sysUtil getDirectoryAttributes:&directory directoryPath:dirPath];
-    [sysUtil release];
+    [sysUtil_ getDirectoryAttributes:&directory directoryPath:dirPath];
     
     // データ接続をオープンしようとすることを知らせる
     session.resCode_ = FTP_DATACONN;
@@ -355,8 +352,7 @@
             socklen_t sockLen = sizeof(address);
 
             session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)&address, &sockLen);
-            int yes = 1;
-            setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
+            [sysUtil_ activateNoSigPipe:session.dataFd_];
 
         } else {
             session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -369,8 +365,7 @@
                 @throw ex;
             }
             
-            int yes = 1;
-            setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
+            [sysUtil_ activateNoSigPipe:session.dataFd_];
 
             error = connect(session.dataFd_, (struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in));  // PORTコマンドでアドレス設定済み
             if (error < 0) {
@@ -386,8 +381,8 @@
         
         PDataParam* param = [[PDataParam alloc]
                              initWithSendData:[directory UTF8String] dataSize:strlen([directory UTF8String]) session:session dataFd:session.dataFd_];
-        NSInvocationOperation* operation = [[NSInvocationOperation alloc] initWithTarget:dataIO_ selector:@selector(sendData:) object:param];
-        addOperation = [self addOperation:operation session:session];
+        [NSThread detachNewThreadSelector:@selector(sendData:) toTarget:dataIO_ withObject:param];
+        addOperation = [self addOperation:nil session:session];
                 
     }
     @catch (NSException *exception) {
@@ -395,7 +390,7 @@
         session.resCode_ = FTP_BADSENDFILE;
         session.resMessage_ = [exception reason];
     }
-    
+
     if (!addOperation) {
         [ctrlIO_ sendResponseNormal:session];
         
@@ -520,7 +515,6 @@
 - (void) handleABOR:(PSession*)session {
     session.isAbort_ = YES;
     
-    [session.operationQueue_ waitUntilAllOperationsAreFinished];
     session.resCode_ = FTP_ABOROK;
     session.resMessage_ = @"Aborted.";
     [ctrlIO_ sendResponseNormal:session];
@@ -546,7 +540,7 @@
     BOOL addOperation = NO;
     
     NSFileManager* fileManager = [NSFileManager defaultManager];
-    
+
     @try {
         // ファイルが存在するか
         if ([fileManager fileExistsAtPath:filePath isDirectory:&isDir] == NO) {
@@ -591,8 +585,7 @@
             socklen_t sockLen = sizeof(address);
 
             session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)&address, &sockLen);
-            int yes = 1;
-            setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
+            [sysUtil_ activateNoSigPipe:session.dataFd_];
             
         } else {
             session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -605,8 +598,7 @@
                 @throw ex;
             }
             
-            int yes = 1;
-            setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
+            [sysUtil_ activateNoSigPipe:session.dataFd_];
 
             err = connect(session.dataFd_, (struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in));
             if (err < 0) {
@@ -620,14 +612,14 @@
         }
 
         PDataParam* param = [[PDataParam alloc] initWithSendFile:fileHandle fileSize:fileSize session:session dataFd:session.dataFd_];
-        NSInvocationOperation* operation = [[NSInvocationOperation alloc] initWithTarget:dataIO_ selector:@selector(sendFile:) object:param];
-        addOperation = [self addOperation:operation session:session];
+        [NSThread detachNewThreadSelector:@selector(sendFile:) toTarget:dataIO_ withObject:param];
+        addOperation = [self addOperation:nil session:session];
         
     }
     @catch (NSException *exception) {
         NSLog(@"[ERROR] %@ communicate: %@: %@", NSStringFromClass([self class]), [exception name], [exception reason]);
     }
-
+    
     if (!addOperation) {
         if (session.dataFd_ > 0) {
             close(session.dataFd_);
@@ -655,8 +647,7 @@
         struct sockaddr_in address;
         socklen_t sockLen = sizeof(address);
         session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)&address, &sockLen);
-        int yes = 1;
-        setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
+        [sysUtil_ activateNoSigPipe:session.dataFd_];
 
     } else {
         session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -668,8 +659,7 @@
             return;
         }
         
-        int yes = 1;
-        setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
+        [sysUtil_ activateNoSigPipe:session.dataFd_];
 
         if (connect(session.dataFd_, (const struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in)) < 0) {
             NSLog(@"[ERROR] Can't open data connection.");
@@ -708,9 +698,9 @@
             session.resMessage_ = @"Failed to open file";
             
         } else {
-            PDataParam* param = [[PDataParam alloc] initWithRecvFile:fileHandle session:session dataFd:session.dataFd_];            
-            NSInvocationOperation* operation = [[NSInvocationOperation alloc] initWithTarget:dataIO_ selector:@selector(recvFile:) object:param];
-            addOperation = [self addOperation:operation session:session];
+            PDataParam* param = [[PDataParam alloc] initWithRecvFile:fileHandle session:session dataFd:session.dataFd_];
+            [NSThread detachNewThreadSelector:@selector(recvFile:) toTarget:dataIO_ withObject:param];
+            addOperation = [self addOperation:nil session:session];
         }
     }
     
@@ -744,8 +734,8 @@
         socklen_t sockLen = sizeof(address);
         
         session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)&address, &sockLen);
-        int yes = 1;
-        setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
+        
+        [sysUtil_ activateNoSigPipe:session.dataFd_];
 
     } else {
         session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -757,8 +747,7 @@
             return;
         }
         
-        int yes = 1;
-        setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
+        [sysUtil_ activateNoSigPipe:session.dataFd_];
         
         if (connect(session.dataFd_, (const struct sockaddr*)session.pPortSockAddress_, sizeof(struct sockaddr_in)) < 0) {
             NSLog(@"[ERROR] Can't open data connection.");
@@ -787,9 +776,8 @@
                 
         
         PDataParam* param = [[PDataParam alloc] initWithRecvFile:fileHandle session:session dataFd:session.dataFd_];
-        NSInvocationOperation* operation = [[NSInvocationOperation alloc] initWithTarget:dataIO_ selector:@selector(recvFile:) object:param];
-        addOperation = [self addOperation:operation session:session];
-        
+        [NSThread detachNewThreadSelector:@selector(recvFile:) toTarget:dataIO_ withObject:param];
+        addOperation = [self addOperation:nil session:session];
     }
     
     if (!addOperation) {
@@ -842,6 +830,41 @@
     session.resCode_ = FTP_HELP;
     session.resMessage_ = @"Help OK.";
     [ctrlIO_ sendResponseHyphen:session];    
+}
+
+- (void) handleRNFR:(PSession*)session {
+    NSString* fileName = session.reqMessage_;
+    if (![self isAbsolutePath:fileName]) {
+        fileName = [self appendPathandFileName:session.currentDirectory_ fileName:fileName];
+    }
+    if ([self isFileExist:fileName]) {
+        session.renameFrom_ = [fileName retain];
+        session.resCode_ = FTP_RNFROK;
+        session.resMessage_ = @"Please input rename to...";
+    } else {
+        session.resCode_ = FTP_FILEFAIL;
+        session.resMessage_ = @"File not found.";
+    }
+    [ctrlIO_ sendResponseNormal:session];
+}
+
+- (void) handleRNTO:(PSession*)session {
+    NSString* fileName = session.reqMessage_;
+    NSError* error = nil;
+    if (![self isAbsolutePath:fileName]) {
+        fileName = [self appendPathandFileName:session.currentDirectory_ fileName:fileName];
+    }
+    [[NSFileManager defaultManager] moveItemAtPath:session.renameFrom_ toPath:fileName error:&error];
+    if (error) {
+        NSLog(@"[ERROR] handleRNTO: %@", [error localizedDescription]);
+        session.resCode_ = FTP_RENAMEFAIL;
+        session.resMessage_ = [error localizedDescription];
+    } else {
+        session.resCode_ = FTP_RNTOOK;
+        session.resMessage_ = @"Rename successful.";
+    }
+    [ctrlIO_ sendResponseNormal:session];
+    [session.renameFrom_ release];
 }
 
 - (void) handleREST:(PSession*)session {
@@ -914,6 +937,10 @@
         [ctrlIO_ sendResponseNormal:session];
         return 0;
     }
+    
+    [sysUtil_ activateKeepAlive:session.pasvListenFd_];
+    [sysUtil_ activateNoSigPipe:session.pasvListenFd_];
+    
     if (listen(session.pasvListenFd_, 1) < 0) {
         NSLog(@"[ERROR] Failed to listen pasv socket.");
         session.resCode_ = FTP_FILEFAIL;
@@ -969,7 +996,6 @@
 }
 
 - (int) getRemoteDataFd:(PSession*)session statusMessage:(NSString*)statusMessage {
-    PSysUtil* sysUtil;
     int remoteFd;
     if (![self isPasvActive:session] && ![self isPortActive:session]) {
         NSLog(@"neither PORT nor PASV active in getRemoteDataFd:statusMessage:");
@@ -981,8 +1007,7 @@
         remoteFd = [dataIO_ getPortFd:session];
     }
     
-    sysUtil = [[PSysUtil alloc] init];
-    if ([sysUtil retValisError:remoteFd]) {
+    if ([sysUtil_ retValisError:remoteFd]) {
         remoteFd = -1;
     } else  {
         session.resCode_ = FTP_DATACONN;
@@ -994,7 +1019,6 @@
             remoteFd = -1;
         }
     }
-    [sysUtil release];
     return remoteFd;
 }
 
@@ -1024,7 +1048,7 @@
             session.currentDirectory_ = [[NSString alloc] initWithString:@"/"];
         } else {
             *p = '\0';
-            if ([self changeDirectoryEnable:[NSString stringWithUTF8String:buffer]]) {
+            if ([self isChangeDirectoryEnable:[NSString stringWithUTF8String:buffer]]) {
                 [session.currentDirectory_ release];
                 session.currentDirectory_ = [[NSString alloc] initWithUTF8String:buffer];
             } else {
@@ -1045,7 +1069,7 @@
                 }
             }
             
-            if ([self changeDirectoryEnable:next]) {
+            if ([self isChangeDirectoryEnable:next]) {
                 [session.currentDirectory_ release];
                 session.currentDirectory_ = [next retain];
             } else {
@@ -1062,7 +1086,7 @@
                     return NO;
                 }
             }
-            if ([self changeDirectoryEnable:nextDirectory]) {
+            if ([self isChangeDirectoryEnable:nextDirectory]) {
                 [session.currentDirectory_ release];
                 session.currentDirectory_ = [nextDirectory retain];
             } else {
@@ -1074,7 +1098,7 @@
     return YES;
 }
 
-- (BOOL) changeDirectoryEnable:(NSString*)path {
+- (BOOL) isChangeDirectoryEnable:(NSString*)path {
     BOOL isExist = NO;
     BOOL isDirectory = NO;
     
@@ -1083,6 +1107,10 @@
         return NO;
     }
     return YES;
+}
+
+- (BOOL) isFileExist:(NSString*)path {
+    return [[NSFileManager defaultManager] fileExistsAtPath:path];
 }
 
 - (BOOL) isSymbolicLink:(NSString*)path {
@@ -1159,13 +1187,14 @@
 }
 
 - (BOOL) addOperation:(NSOperation*)operation session:(PSession*)session {
-    [session.operationQueue_ addOperation:operation];
+//    [session.operationQueue_ addOperation:operation];
     session.dataFd_ = -1;
-    [operation release];
+//    [operation release];
     return YES;
 }
 
 - (void)dealloc {
+    [sysUtil_ release];
     [dataIO_ release];
     [ctrlIO_ release];
     [super dealloc];

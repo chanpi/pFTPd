@@ -32,11 +32,13 @@
 #define FTP_CWDOK           250
 #define FTP_RMDIROK         250
 #define FTP_DELEOK          250
+#define FTP_RNTOOK          250
 #define FTP_PWDOK           257
 #define FTP_MKDIROK         257
 
 #define FTP_GIVEPWORD       331
 #define FTP_RESTOK          350
+#define FTP_RNFROK          350
 
 #define FTP_LOCALERROR      421
 #define FTP_BADSENDCONN     425
@@ -50,5 +52,6 @@
 #define FTP_FILEFAIL        550
 #define FTP_NOPENM          550
 #define FTP_UPLOADFAIL      553
+#define FTP_RENAMEFAIL      553
 
 #endif /* P_FTPCODES_H */

@@ -16,7 +16,8 @@ void sigpipe_handler(int signum) {
 int main(int argc, char *argv[]) {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     
-    signal(SIGPIPE, sigpipe_handler);
+    //signal(SIGPIPE, sigpipe_handler);
+    signal(SIGPIPE, SIG_IGN);
     int retVal = UIApplicationMain(argc, argv, nil, nil);
     [pool release];
     return retVal;

@@ -58,11 +58,9 @@ struct Psockaddr {
     BOOL isControlUseSSL_;
     BOOL isDataUseSSL_;
     
-    // Data IO operation queue
-    NSOperationQueue* operationQueue_;
-    
     // session information
     NSString* currentDirectory_;
+    NSString* renameFrom_;
 }
 
 @property (assign) CFSocketNativeHandle controlFd_;
@@ -94,8 +92,7 @@ struct Psockaddr {
 @property (assign) BOOL isControlUseSSL_;
 @property (assign) BOOL isDataUseSSL_;
 
-@property (assign) NSOperationQueue* operationQueue_;
-
 @property (assign) NSString* currentDirectory_;
+@property (assign) NSString* renameFrom_;
 
 @end
