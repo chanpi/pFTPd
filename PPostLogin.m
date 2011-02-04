@@ -31,6 +31,12 @@
 - (int) getRemoteDataFd:(PSession*)session statusMessage:(NSString*)statusMessage;
 - (NSUInteger)separateString:(NSString*)fromString sep:(NSString*)sepString tokens:(NSArray**)tokens;
 
+- (BOOL) changeCurrentDirectory:(PSession*)session nextDirectory:(NSString*)nextDirectory;
+- (BOOL) changeDirectoryEnable:(NSString*)path;
+- (BOOL) isSymbolicLink:(NSString*)path;
+- (BOOL) getRealPath:(NSString*)linkName realName:(char*)realName;
+- (BOOL) isAbsolutePath:(NSString*)path;
+- (NSString*) appendPathandFileName:(NSString*)path fileName:(NSString*)fileName;
 - (BOOL) addOperation:(NSOperation*)operation session:(PSession*)session;
 @end
 
@@ -111,41 +117,49 @@
 }
 
 - (void) handlePWD:(PSession*)session {
-    char path[PATH_MAX] = {0};
-    char* pwd = getcwd(path, sizeof(path));
-    if (pwd != NULL) {
-        session.resCode_ = FTP_PWDOK;
-        session.resMessage_ = [NSString stringWithFormat:@"\"%@\"", [NSString stringWithUTF8String:path]];
-    } else {
+    if (session.currentDirectory_ == nil) {
         session.resCode_ = FTP_FILEFAIL;
         session.resMessage_ = @"Failed to get current directory.";
+    } else {
+        session.resCode_ = FTP_PWDOK;
+        session.resMessage_ = [NSString stringWithFormat:@"\"%@\"", session.currentDirectory_];
     }
     [ctrlIO_ sendResponseNormal:session];
 }
 
 - (void) handleCWD:(PSession*)session {
-    if (chdir([session.reqMessage_ UTF8String]) == 0) {
-        session.resCode_ = FTP_CWDOK;
-        session.resMessage_ = @"Directory successfully changed.";
-    } else {
-        NSLog(@"[ERROR] chdir [errno: %d]", errno);
+    if ([self changeCurrentDirectory:session nextDirectory:session.reqMessage_] == NO) {
+        NSLog(@"[ERROR] changeCurrentDirectory: %@", session.currentDirectory_);
         session.resCode_ = FTP_FILEFAIL;
         session.resMessage_ = @"Failed to change directory.";
-    }
+    } else {
+        session.resCode_ = FTP_CWDOK;
+        session.resMessage_ = @"Directory successfully changed.";
+    }    
     [ctrlIO_ sendResponseNormal:session];
 }
 
 - (void) handleCDUP:(PSession*)session {
-    [session.reqMessage_ release];  // 元々allocされているので一度releaseしている
-    session.reqMessage_ = [[NSString alloc] initWithString:@".."];
-    [self handleCWD:session];
+    if ([self changeCurrentDirectory:session nextDirectory:@".."] == NO) {
+        NSLog(@"[ERROR] changeCurrentDirectory: %@", session.currentDirectory_);
+        session.resCode_ = FTP_LOCALERROR;
+        session.resMessage_ = @"Failed to change directory.";
+    } else {
+        session.resCode_ = FTP_CDUPOK;
+        session.resMessage_ = @"Directory successfully changed.";
+    }
+    [ctrlIO_ sendResponseNormal:session];
 }
 
 - (void) handleMKD:(PSession*)session {
     NSFileManager* fileManager = [NSFileManager defaultManager];
     
     // ファイル名のチェック
-    if ([fileManager fileExistsAtPath:session.reqMessage_]) {
+    NSString* newDirectoryName = session.reqMessage_;
+    if (![self isAbsolutePath:newDirectoryName]) {
+        newDirectoryName = [self appendPathandFileName:session.currentDirectory_ fileName:newDirectoryName];
+    }
+    if ([fileManager fileExistsAtPath:newDirectoryName]) {
         session.resCode_ = FTP_FILEFAIL;
         session.resMessage_ = @"File exist at path.";
         [ctrlIO_ sendResponseNormal:session];
@@ -153,7 +167,7 @@
     }
     
     NSError* error = nil;
-    if ([fileManager createDirectoryAtPath:session.reqMessage_ withIntermediateDirectories:YES attributes:nil error:&error]) {
+    if ([fileManager createDirectoryAtPath:newDirectoryName withIntermediateDirectories:YES attributes:nil error:&error]) {
         session.resCode_ = FTP_MKDIROK;
         session.resMessage_ = [NSString stringWithFormat:@"\"%@\" created.", session.reqMessage_];
     } else {
@@ -166,7 +180,11 @@
 - (void) handleRMD:(PSession*)session {
     NSFileManager* fileManeger = [NSFileManager defaultManager];
     NSError* error = nil;
-    if ([fileManeger removeItemAtPath:session.reqMessage_ error:&error]) {
+    NSString* targetDirectory = session.reqMessage_;
+    if (![self isAbsolutePath:targetDirectory]) {
+        targetDirectory = [self appendPathandFileName:session.currentDirectory_ fileName:targetDirectory];
+    }
+    if ([fileManeger removeItemAtPath:targetDirectory error:&error]) {
         session.resCode_ = FTP_RMDIROK;
         session.resMessage_ = @"Remove directory operation successful.";
     } else {
@@ -305,34 +323,25 @@
 }
 
 - (void) handleDirCommon:(PSession *)session fullDetailes:(BOOL)fullDetailes statCommand:(BOOL)statCommand {
-    PSysUtil* sysUtil = [[PSysUtil alloc] init];
-    NSString* homeDocumentDirectory = nil;
-
     BOOL addOperation = NO;
     
     int error;
     NSString* dirPath = session.reqMessage_;
     
     if (dirPath == nil || [dirPath length] == 0) {
-        char currentDirectory[PATH_MAX] = {0};
-        char* pwd = getcwd(currentDirectory, sizeof(currentDirectory));
-        if (pwd != NULL) {
-            dirPath = [NSString stringWithUTF8String:currentDirectory];
-        } else {
-            session.resCode_ = FTP_BADSENDFILE;
+        if (session.currentDirectory_ == nil) {
+            session.resCode_ = FTP_LOCALERROR;
             session.resMessage_ = @"Failed to get current directory.";
             [ctrlIO_ sendResponseNormal:session];
-            [sysUtil release];
             return;
+        } else {
+            dirPath = session.currentDirectory_;
         }
     }
     
     NSMutableString* directory = [[NSMutableString alloc] init];
+    PSysUtil* sysUtil = [[PSysUtil alloc] init];
     [sysUtil getDirectoryAttributes:&directory directoryPath:dirPath];
-    if (homeDocumentDirectory != nil) {
-        [homeDocumentDirectory release];
-        homeDocumentDirectory = nil;
-    }
     [sysUtil release];
     
     // データ接続をオープンしようとすることを知らせる
@@ -405,16 +414,24 @@
 }
 
 - (void) handleSIZE:(PSession*)session {
+    /*
     NSFileManager* fileManager = [NSFileManager defaultManager];
     NSError* error;
     NSDictionary* attributes;
     NSString* filePath;
     
+    if (session.currentDirectory_ == nil) {
+        session.resCode_ = FTP_LOCALERROR;
+        session.resMessage_ = @"Failed to get current directory.";
+    } else {
+        
+    }
+    
     char path[PATH_MAX] = {0};
     char* pwd = getcwd(path, sizeof(path));
     if (pwd == NULL) {
-        session.resCode_ = FTP_FILEFAIL;
-        session.resMessage_ = @"Could not get file size.";
+        session.resCode_ = FTP_LOCALERROR;
+        session.resMessage_ = @"Failed to get current directory.";
     } else {
         NSString* tempFormat;
         if (path[strlen(path)-1] != '/') {
@@ -446,6 +463,7 @@
         }
     }
     [ctrlIO_ sendResponseNormal:session];
+     */
 }
 
 - (void) handlePORT:(PSession*)session {
@@ -512,7 +530,11 @@
 
 
 - (void) handleRETR:(PSession*)session {
-    NSString* filePath = session.reqMessage_;   // TODO!! 絶対パス
+    NSString* filePath = session.reqMessage_;
+    if (![self isAbsolutePath:filePath]) {
+        filePath = [self appendPathandFileName:session.currentDirectory_ fileName:filePath];
+    }
+    
     NSError* error;
     unsigned long fileSize = 0;
     BOOL isDir;
@@ -524,10 +546,11 @@
     BOOL addOperation = NO;
     
     NSFileManager* fileManager = [NSFileManager defaultManager];
+    
     @try {
         // ファイルが存在するか
         if ([fileManager fileExistsAtPath:filePath isDirectory:&isDir] == NO) {
-            NSLog(@"[ERROR] File not found %@.", session.reqMessage_);
+            NSLog(@"[ERROR] File not found %@.", filePath);
             session.resCode_ = FTP_FILEFAIL;
             session.resMessage_ = @"File not found";
             [ctrlIO_ sendResponseNormal:session];
@@ -634,7 +657,6 @@
         session.dataFd_ = accept(session.pasvListenFd_, (struct sockaddr*)&address, &sockLen);
         int yes = 1;
         setsockopt(session.dataFd_, SOL_SOCKET, SO_NOSIGPIPE, (const void*)&yes, sizeof(yes));
-        NSLog(@"accepted!!");
 
     } else {
         session.dataFd_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -664,7 +686,11 @@
     [ctrlIO_ sendResponseNormal:session];
     
     // ファイルを作成
-    const char* encodedFileName = [session.reqMessage_ cStringUsingEncoding:NSUTF8StringEncoding];
+    NSString* fileName = session.reqMessage_;
+    if (![self isAbsolutePath:fileName]) {
+        fileName = [self appendPathandFileName:session.currentDirectory_ fileName:fileName];
+    }
+    const char* encodedFileName = [fileName cStringUsingEncoding:NSUTF8StringEncoding];
     NSString* utf8FileName = [NSString stringWithCString:encodedFileName encoding:NSUTF8StringEncoding];
     ret = [[NSFileManager defaultManager] createFileAtPath:utf8FileName contents:nil attributes:nil];
     
@@ -675,9 +701,9 @@
         
     } else {
         // ファイルに書き込み
-        fileHandle = [NSFileHandle fileHandleForWritingAtPath:session.reqMessage_];
+        fileHandle = [NSFileHandle fileHandleForWritingAtPath:fileName];
         if (!fileHandle) {
-            NSLog(@"[ERROR] Failed to open %@.", session.reqMessage_);
+            NSLog(@"[ERROR] Failed to open %@.", fileName);
             session.resCode_ = FTP_BADSENDFILE;
             session.resMessage_ = @"Failed to open file";
             
@@ -702,8 +728,13 @@
 - (void) handleAPPE:(PSession*)session {
     BOOL addOperation = NO;
     
+    NSString* fileName = session.reqMessage_;
+    if (![self isAbsolutePath:fileName]) {
+        fileName = [self appendPathandFileName:session.currentDirectory_ fileName:fileName];
+    }
+    
     NSFileManager* fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:session.reqMessage_]) {
+    if (![fileManager fileExistsAtPath:fileName]) {
         [self handleSTOR:session];
         return;
     }
@@ -744,14 +775,9 @@
     [ctrlIO_ sendResponseNormal:session];
     
     // ファイルオープンし、追記できるようファイルポジションを進める
-    NSFileHandle* fileHandle = [NSFileHandle fileHandleForWritingAtPath:session.reqMessage_];
+    NSFileHandle* fileHandle = [NSFileHandle fileHandleForWritingAtPath:fileName];
     if (fileHandle == nil) {
-        NSLog(@"[ERROR] fileHandleForWritingAtPath: handleAPPE");
-        
-    }
-    
-    if (!fileHandle) {
-        NSLog(@"[ERROR] Failed to open %@.", session.reqMessage_);
+        NSLog(@"[ERROR] Failed to open %@.", fileName);
         session.resCode_ = FTP_BADSENDFILE;
         session.resMessage_ = @"Failed to open file";
         
@@ -779,7 +805,11 @@
 }
 
 - (void) handleDELE:(PSession*)session {
-    const char* encodedFileName = [session.reqMessage_ cStringUsingEncoding:NSUTF8StringEncoding];
+    NSString* fileName = session.reqMessage_;
+    if (![self isAbsolutePath:fileName]) {
+        fileName = [self appendPathandFileName:session.currentDirectory_ fileName:fileName];
+    }
+    const char* encodedFileName = [fileName cStringUsingEncoding:NSUTF8StringEncoding];
     BOOL ret = [[NSFileManager defaultManager]
                 removeItemAtPath:[NSString stringWithCString:encodedFileName encoding:NSUTF8StringEncoding] error:nil];
     
@@ -971,6 +1001,161 @@
 - (NSUInteger)separateString:(NSString*)fromString sep:(NSString*)sepString tokens:(NSArray**)tokens {
     *tokens = [fromString componentsSeparatedByString:sepString];
     return [*tokens count];
+}
+
+- (BOOL) changeCurrentDirectory:(PSession*)session nextDirectory:(NSString*)nextDirectory {
+    // CDUP
+    if ([nextDirectory isEqualToString:@".."]) {
+        if ([session.currentDirectory_ isEqualToString:@"/"]) {
+            return YES;
+        }
+        
+        char buffer[PATH_MAX] = {0};
+        char* p = NULL;
+        
+        strcpy(buffer, [session.currentDirectory_ cStringUsingEncoding:NSUTF8StringEncoding]);
+        if ((p = strrchr(buffer, '/')) == NULL) {
+            NSLog(@"[ERROR] changeCurrentDirectory:nextDirectory:");
+            return NO;
+        }
+        
+        if (p == &buffer[0]) {
+            [session.currentDirectory_ release];
+            session.currentDirectory_ = [[NSString alloc] initWithString:@"/"];
+        } else {
+            *p = '\0';
+            if ([self changeDirectoryEnable:[NSString stringWithUTF8String:buffer]]) {
+                [session.currentDirectory_ release];
+                session.currentDirectory_ = [[NSString alloc] initWithUTF8String:buffer];
+            } else {
+                return NO;
+            }
+        }
+        
+    // CWD
+    } else {
+        if (![self isAbsolutePath:nextDirectory]) {
+            NSString* next = [self appendPathandFileName:session.currentDirectory_ fileName:nextDirectory];
+            if ([self isSymbolicLink:next]) {
+                char buffer[PATH_MAX] = {0};
+                if ([self getRealPath:next realName:buffer]) {
+                    next = [NSString stringWithUTF8String:buffer];
+                } else {
+                    return NO;
+                }
+            }
+            
+            if ([self changeDirectoryEnable:next]) {
+                [session.currentDirectory_ release];
+                session.currentDirectory_ = [next retain];
+            } else {
+                return NO;
+            }
+            
+        } else {
+            nextDirectory = [self appendPathandFileName:nextDirectory fileName:nil];    // 末尾の/を除去
+            if ([self isSymbolicLink:nextDirectory]) {
+                char buffer[PATH_MAX] = {0};
+                if ([self getRealPath:nextDirectory realName:buffer]) {
+                    nextDirectory = [NSString stringWithUTF8String:buffer];
+                } else {
+                    return NO;
+                }
+            }
+            if ([self changeDirectoryEnable:nextDirectory]) {
+                [session.currentDirectory_ release];
+                session.currentDirectory_ = [nextDirectory retain];
+            } else {
+                return NO;
+            }
+        }
+    }
+    NSLog(@"#####chdir: %@", session.currentDirectory_);
+    return YES;
+}
+
+- (BOOL) changeDirectoryEnable:(NSString*)path {
+    BOOL isExist = NO;
+    BOOL isDirectory = NO;
+    
+    isExist = [[NSFileManager defaultManager] fileExistsAtPath:path isDirectory:&isDirectory];
+    if (!isExist || !isDirectory) {
+        return NO;
+    }
+    return YES;
+}
+
+- (BOOL) isSymbolicLink:(NSString*)path {
+    NSError* error = nil;
+    NSDictionary* attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:&error];
+    if (error != nil) {
+        if (errno == 1) {
+            NSLog(@"[ERROR] attributesOfItemAtPath: errno = 1. Not super-user.");
+        } else {
+            NSLog(@"[ERROR] attributesOfItemAtPath: %@", [error localizedDescription]);
+        }
+        return NO;  // TODO!!
+    }
+    return [[attributes objectForKey:NSFileType] isEqualToString:NSFileTypeSymbolicLink];
+}
+
+- (BOOL) getRealPath:(NSString*)linkName realName:(char*)realName {
+    if (realpath([linkName UTF8String], realName) == NULL) {
+        if (errno == 1) {
+            NSLog(@"[ERROR] realpath: errno = 1. Not super-user.");
+        } else {
+            NSLog(@"[ERROR] realpath: %d", errno);
+        }
+        return NO;
+    }
+    return YES;
+}
+
+// 絶対パスかどうか
+- (BOOL) isAbsolutePath:(NSString*)path {
+    if ([path characterAtIndex:0] == '/') {
+        return YES;
+    }
+    return NO;
+}
+
+- (NSString*) appendPathandFileName:(NSString*)path fileName:(NSString*)fileName {
+    if (path == nil) {
+        if ([fileName characterAtIndex:[fileName length]-1] == '/') {
+            return [fileName substringToIndex:[fileName length]-1];
+        } else {
+            return fileName;
+        }
+    }
+    if (fileName == nil) {
+        if (![path isEqualToString:@"/"] && [path characterAtIndex:[path length]-1] == '/') {
+            return [path substringToIndex:[path length]-1];
+        } else {
+            return path;
+        }
+    }
+    
+    NSString* format;
+    NSString* tempFileName = fileName;
+    if ([fileName characterAtIndex:[fileName length]-1] == '/') {
+        tempFileName = [fileName substringToIndex:[fileName length]-1];
+    }
+    if ([path characterAtIndex:[path length]-1] != '/') {
+        if ([tempFileName characterAtIndex:0] != '/') {
+            format = @"%@/%@";
+        } else {
+            format = @"%@%@";
+        }
+    } else {
+        if ([tempFileName characterAtIndex:0] != '/') {
+            format = @"%@%@";
+        } else {
+            format = @"%@%@";
+            tempFileName = [tempFileName substringFromIndex:1];
+        }
+    }
+    
+    return [NSString stringWithFormat:format, path, tempFileName];
 }
 
 - (BOOL) addOperation:(NSOperation*)operation session:(PSession*)session {

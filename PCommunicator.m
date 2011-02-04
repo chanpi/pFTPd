@@ -89,13 +89,6 @@
         [self sessionInitialize:session];
         
         // create stream
-        CFReadStreamRef readStream;
-        CFWriteStreamRef writeStream;
-        CFStreamCreatePairWithSocket(kCFAllocatorDefault, session.controlFd_, &readStream, &writeStream);
-        if (readStream == NULL || writeStream == NULL) {
-            NSException* ex =[NSException exceptionWithName:@"PException" reason:@"CFStreamCreatePairWithSocket()" userInfo:nil];
-            @throw ex;
-        }
         [preLogin startLogin:session];
         
         while (1) {
@@ -217,18 +210,6 @@
         NSLog(@"[ERROR] %@ communicate: %@: %@", NSStringFromClass([self class]), [exception name], [exception reason]);
     }
 	@finally {
-        /*
-		if (session.readStream_ != NULL) {
-			CFReadStreamClose(session.readStream_);
-			CFRelease(session.readStream_);
-			session.readStream_ = NULL;
-		}
-		if (session.writeStream_ != NULL) {
-			CFWriteStreamClose(session.writeStream_);
-			CFRelease(session.writeStream_);
-			session.writeStream_ = NULL;
-		}
-         */
         if (session.controlFd_ != -1) {
             char tempBuffer[128];
             shutdown(session.controlFd_, SHUT_WR);

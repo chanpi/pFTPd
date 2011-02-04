@@ -41,13 +41,13 @@
     [ctrlIO_ sendResponseNormal:session];
     
     [sysUtil getHomeDocumentDirectory:&homeDocumentDirectory];
-    if(chdir([homeDocumentDirectory UTF8String]) != 0) {
-        NSLog(@"chdir失敗");
-    } else {
-        NSLog(@"chdir %@", NSHomeDirectory());
+    if (homeDocumentDirectory != nil) {
+        session.currentDirectory_ = homeDocumentDirectory;
+        [session.currentDirectory_ retain];
     }
-    
     [homeDocumentDirectory release];
+    
+    NSLog(@"currentD: %@", session.currentDirectory_);
     [sysUtil release];
     return YES;
 }

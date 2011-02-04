@@ -15,6 +15,7 @@
 #define FTP_PORTOK          200
 #define FTP_TYPEOK          200
 #define FTP_EPSVALLOK       200
+#define FTP_CDUPOK          200
 #define FTP_FEAT            211
 #define FTP_STATOK          211
 #define FTP_SIZEOK          213
@@ -37,7 +38,7 @@
 #define FTP_GIVEPWORD       331
 #define FTP_RESTOK          350
 
-#define FTP_
+#define FTP_LOCALERROR      421
 #define FTP_BADSENDCONN     425
 #define FTP_BADSENDNET      426
 #define FTP_BADSENDFILE     451

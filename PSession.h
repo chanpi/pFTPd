@@ -54,16 +54,15 @@ struct Psockaddr {
     NSString* resSep_;
     NSString* resMessage_;
     
-    // Control Stream
-//    CFReadStreamRef readStream_;
-//    CFWriteStreamRef writeStream_;
-    
     // Secure connections state
     BOOL isControlUseSSL_;
     BOOL isDataUseSSL_;
     
     // Data IO operation queue
     NSOperationQueue* operationQueue_;
+    
+    // session information
+    NSString* currentDirectory_;
 }
 
 @property (assign) CFSocketNativeHandle controlFd_;
@@ -92,12 +91,11 @@ struct Psockaddr {
 @property (assign) NSString* resSep_;
 @property (assign) NSString* resMessage_;
 
-//@property (assign) CFReadStreamRef readStream_;
-//@property (assign) CFWriteStreamRef writeStream_;
-
 @property (assign) BOOL isControlUseSSL_;
 @property (assign) BOOL isDataUseSSL_;
 
 @property (assign) NSOperationQueue* operationQueue_;
+
+@property (assign) NSString* currentDirectory_;
 
 @end

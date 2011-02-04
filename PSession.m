@@ -40,6 +40,8 @@
 @synthesize isDataUseSSL_;
 @synthesize operationQueue_;
 
+@synthesize currentDirectory_;
+
 -(id)init {
     self = [super init];
     
@@ -75,6 +77,8 @@
     
     operationQueue_ = [[NSOperationQueue alloc] init];
     
+    currentDirectory_ = nil;
+    
     return self;
 }
 
@@ -93,6 +97,10 @@
     }
     
     [operationQueue_ release];
+    
+    if (currentDirectory_ != nil) {
+        [currentDirectory_ release];
+    }
     
     [super dealloc];
 }
